@@ -1495,12 +1495,15 @@ window.upCreateDialog = function () {
   const m = document.getElementById('upModal');
   m.innerHTML = `
     <div style="position:fixed;inset:0;background:rgba(15,23,42,0.5);display:flex;align-items:center;justify-content:center;z-index:9999" onclick="if(event.target===this)this.remove()">
-      <div class="card" style="width:460px;max-width:90vw">
+      <div class="card" style="width:480px;max-width:90vw">
         <h3 style="margin-top:0">+ 生成新上传链接</h3>
         <label class="lbl">归属用户 ID</label>
-        <input id="up_user_id" value="usr_demo_001" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:8px;margin-top:4px">
-        <label class="lbl">公司 ID（可选）</label>
-        <input id="up_company_id" placeholder="留空使用用户默认公司" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:8px;margin-top:4px">
+        <input id="up_user_id" value="usr_demo_001" onchange="upLoadCompanies()" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:8px;margin-top:4px">
+        <label class="lbl">归属公司 <span style="color:#ef4444">*</span></label>
+        <select id="up_company_id" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:8px;margin-top:4px">
+          <option value="">— 加载中…（请先填上面的 user_id）—</option>
+        </select>
+        <div class="muted" style="font-size:11px;margin-top:4px">所有通过此链接上传的文件将归属到所选公司的档案库</div>
         <label class="lbl">链接名称</label>
         <input id="up_label" value="账单直传" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:8px;margin-top:4px">
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
@@ -1513,15 +1516,40 @@ window.upCreateDialog = function () {
         </div>
       </div>
     </div>`;
+  // 初始加载公司列表
+  upLoadCompanies();
+};
+
+// 加载当前 user_id 的公司列表填充下拉
+window.upLoadCompanies = async function () {
+  const uid = document.getElementById('up_user_id')?.value?.trim();
+  const sel = document.getElementById('up_company_id');
+  if (!sel) return;
+  if (!uid) { sel.innerHTML = '<option value="">请先填写用户 ID</option>'; return; }
+  sel.innerHTML = '<option value="">加载中…</option>';
+  try {
+    const r = await fetch('/api/upload-portal/my-companies?user_id=' + encodeURIComponent(uid));
+    const d = await r.json();
+    if (!d.ok || !Array.isArray(d.companies) || !d.companies.length) {
+      sel.innerHTML = '<option value="">该用户没有公司（请先创建企业）</option>';
+      return;
+    }
+    sel.innerHTML = d.companies.map((c, i) =>
+      `<option value="${esc(c.id)}"${i === 0 ? ' selected' : ''}>${esc(c.name)}${c.uen ? ' · ' + esc(c.uen) : ''} · ${esc(c.status || '')}</option>`
+    ).join('');
+  } catch (e) {
+    sel.innerHTML = '<option value="">加载失败：' + esc(e.message) + '</option>';
+  }
 };
 
 window.upDoCreate = async function () {
   const user_id    = document.getElementById('up_user_id').value.trim();
-  const company_id = document.getElementById('up_company_id').value.trim() || null;
+  const company_id = document.getElementById('up_company_id').value || null;
   const label      = document.getElementById('up_label').value.trim();
   const expires_days = +document.getElementById('up_exp').value || 0;
   const max_uploads  = +document.getElementById('up_max').value || 0;
   if (!user_id) return alert('user_id 必填');
+  if (!company_id) return alert('请先选择归属公司');
   try {
     const r = await fetch('/api/upload-portal/tokens', {
       method: 'POST',
