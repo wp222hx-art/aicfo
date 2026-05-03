@@ -2,62 +2,98 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#0f172a" />
 <title>AiCFO Admin Console</title>
 <link rel="stylesheet" href="/admin/styles/app.css" />
-<style>
-  .sidebar { width: 220px; background: #0f172a; color: #e2e8f0; height: 100vh; position: fixed; top: 0; left: 0; padding: 20px 12px; display: flex; flex-direction: column; gap: 4px; }
-  .sidebar .brand-logo { font-weight: 700; font-size: 16px; color: white; padding: 6px 10px 16px; border-bottom: 1px solid #1e293b; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
-  .sidebar .brand-logo .dot { width: 8px; height: 8px; border-radius: 50%; background: #10b981; }
-  .sidebar a { color: #94a3b8; padding: 8px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 10px; }
-  .sidebar a:hover { background: #1e293b; color: white; }
-  .sidebar a.active { background: #0ea5e9; color: white; }
-  .sidebar .group-title { font-size: 10px; text-transform: uppercase; letter-spacing: .1em; color: #64748b; padding: 16px 12px 6px; }
-  .sidebar .lang-btn { background: #1e293b; color: #e2e8f0; border: 1px solid #334155; padding: 8px 12px; border-radius: 8px; font-size: 12px; cursor: pointer; margin-top: 10px; display: flex; align-items: center; justify-content: center; gap: 6px; font-family: inherit; }
-  .sidebar .lang-btn:hover { background: #334155; }
-  .admin-main { margin-left: 220px; padding: 24px 28px; min-height: 100vh; background: var(--bg); }
-  .code-editor { font-family: "SF Mono", Consolas, Monaco, monospace; font-size: 12px; background: #0f172a; color: #e2e8f0; border-radius: 8px; padding: 14px; min-height: 300px; border: 1px solid #1e293b; width: 100%; }
-  .json-box { background: #0f172a; color: #86efac; padding: 14px; border-radius: 8px; font-family: "SF Mono", Consolas, monospace; font-size: 12px; overflow: auto; max-height: 400px; white-space: pre-wrap; }
-</style>
 </head>
 <body>
-<aside class="sidebar">
-  <div class="brand-logo"><span class="dot"></span><span data-i18n="admin.brand">AiCFO Admin</span></div>
+<div class="admin-layout">
+  <div class="drawer-mask" id="drawerMask" onclick="toggleSidebar(false)"></div>
+  <aside class="sidebar" id="sidebar">
+    <div class="brand-logo"><span class="dot"></span><span data-i18n="admin.brand">AiCFO Admin</span></div>
 
-  <div class="group-title" data-i18n="admin.group.overview">Overview</div>
-  <a data-route="overview" onclick="anav('overview')" data-i18n="admin.nav.overview">📊 Dashboard</a>
-  <a data-route="queue" onclick="anav('queue')" data-i18n="admin.nav.queue">📋 Review Queue</a>
+    <div class="group-title" data-i18n="admin.group.overview">Overview</div>
+    <a data-route="overview" onclick="anav('overview');toggleSidebar(false)" data-i18n="admin.nav.overview">📊 Dashboard</a>
+    <a data-route="queue" onclick="anav('queue');toggleSidebar(false)" data-i18n="admin.nav.queue">📋 Review Queue</a>
 
-  <div class="group-title" data-i18n="admin.group.agents">Agents</div>
-  <a data-route="agents" onclick="anav('agents')" data-i18n="admin.nav.agents">🤖 Agent Studio</a>
-  <a data-route="runs" onclick="anav('runs')" data-i18n="admin.nav.runs">🔍 Agent Runs</a>
-  <a data-route="playground" onclick="anav('playground')" data-i18n="admin.nav.playground">🎮 Playground</a>
+    <div class="group-title" data-i18n="admin.group.agents">Agents</div>
+    <a data-route="agents" onclick="anav('agents');toggleSidebar(false)" data-i18n="admin.nav.agents">🤖 Agent Studio</a>
+    <a data-route="runs" onclick="anav('runs');toggleSidebar(false)" data-i18n="admin.nav.runs">🔍 Agent Runs</a>
+    <a data-route="playground" onclick="anav('playground');toggleSidebar(false)" data-i18n="admin.nav.playground">🎮 Playground</a>
 
-  <div class="group-title" data-i18n="admin.group.rag">RAG Knowledge</div>
-  <a data-route="rag" onclick="anav('rag')" data-i18n="admin.nav.rag">📚 Knowledge Base</a>
-  <a data-route="training" onclick="anav('training')" data-i18n="admin.nav.training">🎓 Training Jobs</a>
-  <a data-route="retrieval" onclick="anav('retrieval')" data-i18n="admin.nav.retrieval">🔎 Retrieval Test</a>
+    <div class="group-title" data-i18n="admin.group.rag">RAG Knowledge</div>
+    <a data-route="rag" onclick="anav('rag');toggleSidebar(false)" data-i18n="admin.nav.rag">📚 Knowledge Base</a>
+    <a data-route="training" onclick="anav('training');toggleSidebar(false)" data-i18n="admin.nav.training">🎓 Training Jobs</a>
+    <a data-route="retrieval" onclick="anav('retrieval');toggleSidebar(false)" data-i18n="admin.nav.retrieval">🔎 Retrieval Test</a>
 
-  <div class="group-title" data-i18n="admin.group.ops">Operations</div>
-  <a data-route="companyArchive" onclick="anav('companyArchive')" style="background:linear-gradient(90deg,#dbeafe,transparent);font-weight:600">📚 企业档案库 (Archive)</a>
-  <a data-route="companies" onclick="anav('companies')" data-i18n="admin.nav.companies">🏢 Companies</a>
-  <a data-route="users" onclick="anav('users')" data-i18n="admin.nav.users">👤 Users</a>
-  <a data-route="archives" onclick="anav('archives')">📁 用户财务档案</a>
-  <a data-route="waChannels" onclick="anav('waChannels')">📱 WhatsApp 渠道</a>
+    <div class="group-title" data-i18n="admin.group.ops">Operations</div>
+    <a data-route="companyArchive" class="featured" onclick="anav('companyArchive');toggleSidebar(false)" data-i18n="admin.nav.archive">📚 Company Archive</a>
+    <a data-route="companies" onclick="anav('companies');toggleSidebar(false)" data-i18n="admin.nav.companies">🏢 Companies</a>
+    <a data-route="users" onclick="anav('users');toggleSidebar(false)" data-i18n="admin.nav.users">👤 Users</a>
+    <a data-route="archives" onclick="anav('archives');toggleSidebar(false)" data-i18n="admin.nav.userArchive">📁 User Archive</a>
+    <a data-route="waChannels" onclick="anav('waChannels');toggleSidebar(false)" data-i18n="admin.nav.waChannels">📱 WhatsApp Channels</a>
 
-  <div class="group-title">System</div>
-  <a data-route="llmGateway" onclick="anav('llmGateway')">⚡ 模型网关 (Tokenhot)</a>
-  <a data-route="waConfig" onclick="anav('waConfig')">💬 WhatsApp Cloud API</a>
-  <a data-route="uploadPortal" onclick="anav('uploadPortal')">🔗 上传链接 (Upload Portal)</a>
-  <a data-route="tgConfig" onclick="anav('tgConfig')">✈️ Telegram Bot</a>
+    <div class="group-title" data-i18n="admin.group.system">System</div>
+    <a data-route="llmGateway" onclick="anav('llmGateway');toggleSidebar(false)" data-i18n="admin.nav.llmGateway">⚡ LLM Gateway</a>
+    <a data-route="waConfig" onclick="anav('waConfig');toggleSidebar(false)" data-i18n="admin.nav.waConfig">💬 WhatsApp Cloud API</a>
+    <a data-route="uploadPortal" onclick="anav('uploadPortal');toggleSidebar(false)" data-i18n="admin.nav.uploadPortal">🔗 Upload Portal</a>
+    <a data-route="tgConfig" onclick="anav('tgConfig');toggleSidebar(false)" data-i18n="admin.nav.tgConfig">✈️ Telegram Bot</a>
 
-  <div style="flex:1"></div>
-  <button class="lang-btn" onclick="I18N.toggleLocale()" title="Switch language / 切换语言">
-    <span>🌐</span> <span data-i18n="lang.toggle">中文</span>
-  </button>
-  <a href="/" style="color:#64748b;font-size:12px;margin-top:8px" data-i18n="nav.back_customer">← Back to Customer App</a>
-</aside>
-<main class="admin-main" id="av"></main>
+    <div class="sidebar-footer">
+      <button class="lang-btn" onclick="I18N.toggleLocale()" title="Switch language / 切换语言">
+        <span>🌐</span> <span data-i18n="lang.toggle">中文</span>
+      </button>
+      <a href="/" style="display:block;text-align:center;color:#64748b;font-size:12px;margin-top:10px;padding:6px" data-i18n="nav.back_customer">← Back to Customer App</a>
+    </div>
+  </aside>
+
+  <div class="admin-main">
+    <header class="admin-topbar">
+      <button class="burger" id="burger" onclick="toggleSidebar()" aria-label="Menu"><span></span></button>
+      <div class="page-title" id="pageTitle" data-i18n="admin.brand">AiCFO Admin</div>
+      <div class="top-actions">
+        <button class="lang-toggle hide-sm" onclick="I18N.toggleLocale()" title="Switch language / 切换语言">
+          <span>🌐</span> <span data-i18n="lang.toggle">中文</span>
+        </button>
+        <span class="user-chip">
+          <span class="avatar">A</span>
+          <span class="hide-sm">
+            <div class="user-name" style="font-weight:600;font-size:12px">Admin</div>
+            <div class="user-role" style="font-size:10px;color:var(--text-3)" data-i18n="admin.role">Operations</div>
+          </span>
+        </span>
+      </div>
+    </header>
+    <main class="admin-content" id="av"></main>
+  </div>
+</div>
+
+<script>
+  function toggleSidebar(force) {
+    const sb = document.getElementById('sidebar');
+    const mask = document.getElementById('drawerMask');
+    const willOpen = force === undefined ? !sb.classList.contains('open') : force;
+    sb.classList.toggle('open', willOpen);
+    mask.classList.toggle('open', willOpen);
+  }
+  // 自动把路由名同步到顶部标题
+  window.addEventListener('hashchange', () => {
+    const route = (location.hash.replace('#/', '') || 'overview').split('?')[0];
+    const el = document.getElementById('pageTitle');
+    const map = {
+      overview: 'Dashboard', queue: 'Review Queue',
+      agents: 'Agent Studio', runs: 'Agent Runs', playground: 'Playground',
+      rag: 'Knowledge Base', training: 'Training Jobs', retrieval: 'Retrieval Test',
+      companyArchive: 'Company Archive', companies: 'Companies', users: 'Users',
+      archives: 'User Archive', waChannels: 'WhatsApp Channels',
+      llmGateway: 'LLM Gateway', waConfig: 'WhatsApp Cloud API',
+      uploadPortal: 'Upload Portal', tgConfig: 'Telegram Bot',
+      companyArchiveDetail: 'Company Archive · Detail',
+    };
+    if (el) el.textContent = map[route] || 'AiCFO Admin';
+  });
+</script>
 <script src="/admin/assets/i18n.js"></script>
 <script src="/admin/assets/admin.js"></script>
 </body>

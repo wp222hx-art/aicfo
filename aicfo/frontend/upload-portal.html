@@ -2,171 +2,261 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
-  <title>AiCFO · 上传账单</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#2563eb">
+  <title>AiCFO · Upload / 上传账单</title>
+  <link rel="stylesheet" href="/styles/design-system.css" />
   <style>
-    :root {
-      --brand: #2563eb;
-      --brand-dark: #1e40af;
-      --ok: #10b981;
-      --err: #ef4444;
-      --warn: #f59e0b;
-      --bg: #f6f8fb;
-      --card: #fff;
-      --text: #0f172a;
-      --muted: #64748b;
-      --border: #e2e8f0;
-    }
-    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-    html, body { margin: 0; padding: 0; }
-    body {
-      font-family: -apple-system, "PingFang SC", "Microsoft YaHei", Roboto, "Segoe UI", sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      min-height: 100vh;
-      font-size: 15px;
-      line-height: 1.5;
-    }
-    .wrap { max-width: 560px; margin: 0 auto; padding: 16px; }
-    .hdr {
-      background: linear-gradient(135deg, var(--brand), var(--brand-dark));
-      color: #fff; border-radius: 18px; padding: 22px 18px;
-      box-shadow: 0 8px 24px rgba(37,99,235,0.25);
+    body { background: linear-gradient(180deg, #eff6ff 0%, var(--bg) 220px); }
+    .wrap { max-width: 560px; margin: 0 auto; padding: 16px; padding-top: calc(16px + var(--safe-top)); padding-bottom: calc(32px + var(--safe-bottom)); }
+
+    /* Hero header */
+    .portal-hdr {
+      background: linear-gradient(135deg, var(--primary), var(--accent));
+      color: #fff;
+      border-radius: var(--r-lg);
+      padding: 24px 20px;
+      box-shadow: 0 12px 32px rgba(37,99,235,.22);
       margin-bottom: 16px;
+      position: relative;
+      overflow: hidden;
     }
-    .hdr .logo { font-size: 26px; font-weight: 700; margin-bottom: 6px; }
-    .hdr .sub  { opacity: 0.9; font-size: 14px; }
-    .hdr .meta { margin-top: 14px; font-size: 13px; background: rgba(255,255,255,0.14); padding: 8px 12px; border-radius: 10px; }
-    .hdr .meta .row { display: flex; justify-content: space-between; margin: 2px 0; }
-
-    .card {
-      background: var(--card); border-radius: 14px; padding: 16px;
-      box-shadow: 0 2px 8px rgba(15,23,42,0.06);
-      margin-bottom: 14px;
+    .portal-hdr::before {
+      content: "";
+      position: absolute; top: -40%; right: -20%;
+      width: 300px; height: 300px;
+      background: radial-gradient(circle, rgba(255,255,255,.2), transparent 65%);
+      pointer-events: none;
     }
-    .card h3 { margin: 0 0 10px; font-size: 16px; }
-
-    .drop {
-      border: 2px dashed #cbd5e1; border-radius: 12px;
-      padding: 28px 14px; text-align: center;
-      transition: all .2s;
+    .portal-hdr .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; position: relative; }
+    .portal-hdr .logo { font-size: 22px; font-weight: 800; letter-spacing: -.02em; }
+    .portal-hdr .sub  { opacity: .92; font-size: 13px; margin-top: 2px; }
+    .portal-hdr .lang-btn {
+      background: rgba(255,255,255,.18);
+      color: #fff;
+      border: 1px solid rgba(255,255,255,.3);
+      padding: 5px 11px;
+      border-radius: var(--r-full);
+      font-size: 12px;
+      font-weight: 600;
+      backdrop-filter: blur(8px);
       cursor: pointer;
-      background: #fafbfd;
+      flex-shrink: 0;
     }
-    .drop.over { border-color: var(--brand); background: #eff6ff; }
-    .drop .icon { font-size: 42px; line-height: 1; margin-bottom: 8px; }
-    .drop .big { font-weight: 600; margin-bottom: 4px; }
-    .drop .small { color: var(--muted); font-size: 13px; }
+    .portal-hdr .lang-btn:hover { background: rgba(255,255,255,.3); }
+    .portal-hdr .meta {
+      margin-top: 16px;
+      font-size: 13px;
+      background: rgba(255,255,255,.14);
+      padding: 10px 14px;
+      border-radius: var(--r);
+      backdrop-filter: blur(8px);
+      position: relative;
+    }
+    .portal-hdr .meta .row { display: flex; justify-content: space-between; margin: 3px 0; }
+    .portal-hdr .meta .row .k { opacity: .8; }
 
-    .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
-    .btn {
+    /* Drop zone */
+    .drop {
+      border: 2px dashed var(--border-strong);
+      border-radius: var(--r-md);
+      padding: 32px 16px;
+      text-align: center;
+      transition: all var(--dur) var(--ease);
+      cursor: pointer;
+      background: var(--surface-2);
+      display: block;
+    }
+    .drop:hover, .drop.over {
+      border-color: var(--primary);
+      background: var(--primary-soft);
+      transform: translateY(-2px);
+    }
+    .drop .icon { font-size: 48px; line-height: 1; margin-bottom: 10px; }
+    .drop .big { font-weight: 700; margin-bottom: 4px; font-size: 15px; }
+    .drop .small { color: var(--text-3); font-size: 12.5px; }
+
+    /* Action buttons */
+    .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+    .portal-btn {
       display: flex; align-items: center; justify-content: center; gap: 6px;
-      background: #fff; border: 1.5px solid var(--border); border-radius: 10px;
-      padding: 12px; font-size: 14px; font-weight: 500;
-      cursor: pointer; transition: all .15s;
+      background: var(--surface);
+      border: 1.5px solid var(--border);
+      border-radius: var(--r);
+      padding: 14px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all var(--dur) var(--ease);
+      color: var(--text);
     }
-    .btn:hover { border-color: var(--brand); color: var(--brand); }
-    .btn.primary {
-      background: var(--brand); color: #fff; border-color: var(--brand);
+    .portal-btn:hover { border-color: var(--primary); color: var(--primary); background: var(--primary-soft); }
+    .portal-btn:active { transform: translateY(1px); }
+    .portal-btn.primary {
+      background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+      color: #fff;
+      border-color: var(--primary);
+      box-shadow: 0 4px 14px rgba(37,99,235,.3);
     }
-    .btn.primary:hover { background: var(--brand-dark); color: #fff; }
-    .btn:disabled { opacity: 0.55; cursor: not-allowed; }
-    .btn.block { width: 100%; grid-column: span 2; padding: 14px; font-size: 15px; }
+    .portal-btn.primary:hover { box-shadow: 0 6px 20px rgba(37,99,235,.4); color: #fff; }
+    .portal-btn:disabled { opacity: .55; cursor: not-allowed; pointer-events: none; }
+    .portal-btn.block { width: 100%; grid-column: span 2; padding: 16px; font-size: 15px; }
 
     input[type=file] { display: none; }
-    input, textarea {
-      width: 100%; border: 1px solid var(--border); border-radius: 10px;
-      padding: 10px 12px; font-size: 14px; font-family: inherit;
+    textarea, .portal-input {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      padding: 11px 13px;
+      font-size: 14px;
+      font-family: inherit;
       margin-top: 4px;
+      background: var(--surface);
+      transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
     }
-    input:focus, textarea:focus { outline: none; border-color: var(--brand); }
-    label.lbl { font-size: 13px; color: var(--muted); display: block; margin-top: 10px; }
+    textarea:focus, .portal-input:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px var(--primary-light);
+    }
+    label.lbl { font-size: 13px; color: var(--text-2); display: block; margin-top: 14px; font-weight: 600; }
     textarea { resize: vertical; min-height: 70px; }
 
-    .file-list { margin-top: 12px; }
+    /* File list */
+    .file-list { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
     .file-item {
       display: flex; align-items: center; gap: 10px;
-      padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px;
-      margin-bottom: 8px; background: #fafbfd;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      background: var(--surface);
+      animation: slideUp .2s var(--ease);
     }
     .file-item .thumb {
-      width: 42px; height: 42px; border-radius: 8px; background: #eef2f7;
-      display: flex; align-items: center; justify-content: center; overflow: hidden;
-      font-size: 18px; color: var(--muted);
+      width: 44px; height: 44px;
+      border-radius: var(--r-sm);
+      background: var(--surface-2);
+      display: flex; align-items: center; justify-content: center;
+      overflow: hidden;
+      font-size: 20px; color: var(--text-3);
       flex-shrink: 0;
     }
     .file-item .thumb img { width: 100%; height: 100%; object-fit: cover; }
     .file-item .info { flex: 1; min-width: 0; }
-    .file-item .name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .file-item .size { font-size: 11px; color: var(--muted); }
-    .file-item .rm { color: var(--err); font-size: 18px; padding: 4px 8px; cursor: pointer; background: none; border: none; }
+    .file-item .name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .file-item .size { font-size: 11px; color: var(--text-3); margin-top: 2px; }
+    .file-item .rm {
+      color: var(--danger); font-size: 20px;
+      padding: 6px 10px; cursor: pointer;
+      background: none; border: none;
+      border-radius: var(--r-sm);
+      line-height: 1;
+    }
+    .file-item .rm:hover { background: #fee2e2; }
 
-    .status { padding: 14px; border-radius: 12px; margin-top: 10px; text-align: center; font-size: 14px; }
+    /* Status feedback */
+    .status {
+      padding: 18px 14px; border-radius: var(--r-md);
+      margin-top: 12px; text-align: center; font-size: 14px;
+      animation: slideUp .3s var(--ease);
+    }
     .status.ok  { background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
     .status.err { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
-    .status.loading { background: #eff6ff; color: var(--brand-dark); border: 1px solid #bfdbfe; }
-    .status .emoji { font-size: 22px; display: block; margin-bottom: 4px; }
-    .status .detail { font-size: 12px; color: var(--muted); margin-top: 4px; }
+    .status.loading { background: var(--primary-soft); color: var(--primary-dark); border: 1px solid var(--primary-light); }
+    .status .emoji { font-size: 32px; display: block; margin-bottom: 6px; }
+    .status .detail { font-size: 12px; color: var(--text-3); margin-top: 6px; }
 
-    .footer { text-align: center; color: var(--muted); font-size: 11px; padding: 20px 8px; }
-    .footer a { color: var(--brand); text-decoration: none; }
+    /* Quick-hint strip */
+    .hint {
+      background: #fffbeb;
+      border: 1px solid #fde68a;
+      border-radius: var(--r);
+      padding: 10px 14px;
+      font-size: 12.5px;
+      color: #92400e;
+      margin-bottom: 14px;
+      display: flex; gap: 8px;
+    }
 
-    .badge {
-      display: inline-block; background: rgba(255,255,255,0.18);
-      padding: 2px 8px; border-radius: 20px;
-      font-size: 11px; letter-spacing: 0.5px;
+    .footer { text-align: center; color: var(--text-3); font-size: 11px; padding: 20px 8px; }
+    .footer a { color: var(--primary); }
+
+    .badge-hdr {
+      display: inline-block;
+      background: rgba(255,255,255,.22);
+      padding: 3px 10px; border-radius: var(--r-full);
+      font-size: 11px; font-weight: 600; letter-spacing: .3px;
     }
     .hide { display: none !important; }
 
-    /* animation */
-    @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .5 } }
+    @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .55 } }
     .pulsing { animation: pulse 1.3s ease-in-out infinite; }
     @keyframes slideUp {
-      from { transform: translateY(10px); opacity: 0; }
+      from { transform: translateY(8px); opacity: 0; }
       to   { transform: translateY(0); opacity: 1; }
     }
-    .card, .status { animation: slideUp .25s ease-out; }
+
+    /* Mobile tweaks */
+    @media (max-width: 480px) {
+      .wrap { padding: 12px; }
+      .portal-hdr { padding: 20px 16px; border-radius: var(--r-md); }
+      .portal-hdr .logo { font-size: 20px; }
+      .drop { padding: 24px 12px; }
+      .drop .icon { font-size: 40px; }
+    }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <div class="hdr">
-      <div class="logo">💼 AiCFO</div>
-      <div class="sub">AI 自动识别 · 自动记账 · 新加坡 SFRS / GST 合规</div>
+    <div class="portal-hdr">
+      <div class="top">
+        <div>
+          <div class="logo">💼 AiCFO</div>
+          <div class="sub" data-i18n="portal.sub">AI 自动识别 · 自动记账 · SFRS / GST 合规</div>
+        </div>
+        <button class="lang-btn" onclick="togglePortalLang()" title="Switch language / 切换语言">
+          🌐 <span id="langLbl">EN</span>
+        </button>
+      </div>
       <div class="meta" id="metaBox">
-        <div class="row"><span>上传到</span><span id="metaCompany" class="badge">加载中…</span></div>
-        <div class="row"><span>链接</span><span id="metaLabel">—</span></div>
-        <div class="row"><span>已使用</span><span id="metaUsage">0 / ∞</span></div>
+        <div class="row"><span class="k" data-i18n="portal.uploadTo">Upload to</span><span id="metaCompany" class="badge-hdr" data-i18n="portal.loading">Loading…</span></div>
+        <div class="row"><span class="k" data-i18n="portal.link">Link</span><span id="metaLabel">—</span></div>
+        <div class="row"><span class="k" data-i18n="portal.used">Used</span><span id="metaUsage">0 / ∞</span></div>
       </div>
     </div>
 
     <div id="mainBox">
+      <div class="hint">
+        <span>💡</span>
+        <span data-i18n="portal.hint">Tip: tap 📷 to scan receipts, or paste a screenshot. AI classifies invoice / bank transaction / report automatically.</span>
+      </div>
+
       <div class="card">
-        <h3>📸 上传发票/账单/银行流水</h3>
+        <h3 style="margin:0 0 12px" data-i18n="portal.title">📸 Upload Invoice / Bill / Bank Statement</h3>
 
         <label for="filePick" class="drop" id="drop">
           <div class="icon">📁</div>
-          <div class="big">点击或拖入文件</div>
-          <div class="small">支持 JPG / PNG / PDF / CSV / XLSX · 最大 20MB/文件 · 最多 10 个</div>
+          <div class="big" data-i18n="portal.drop.big">Tap or drop file here</div>
+          <div class="small" data-i18n="portal.drop.small">JPG / PNG / PDF / CSV / XLSX · max 20 MB each · up to 10 files</div>
         </label>
         <input type="file" id="filePick" multiple accept="image/*,application/pdf,.csv,.xlsx,.xls">
 
         <div class="btn-row">
-          <label class="btn" for="cameraPick">📷 拍照</label>
+          <label class="portal-btn" for="cameraPick"><span data-i18n="portal.camera">📷 Take Photo</span></label>
           <input type="file" id="cameraPick" accept="image/*" capture="environment">
-          <label class="btn" for="filePick">🖼️ 相册</label>
+          <label class="portal-btn" for="filePick"><span data-i18n="portal.gallery">🖼️ From Gallery</span></label>
         </div>
 
         <div class="file-list" id="fileList"></div>
 
-        <label class="lbl" for="noteInput">备注（可选）</label>
-        <textarea id="noteInput" placeholder="例如：2025-05 差旅报销、客户应收款、海外供应商付款…"></textarea>
+        <label class="lbl" for="noteInput" data-i18n="portal.note">Note (optional)</label>
+        <textarea id="noteInput" placeholder="e.g. May 2025 travel expenses / overseas supplier payment"></textarea>
 
-        <label class="lbl" for="nameInput">您是（可选）</label>
-        <input id="nameInput" placeholder="姓名 / 部门，如 张三 / 采购部">
+        <label class="lbl" for="nameInput" data-i18n="portal.yourName">Your name (optional)</label>
+        <input id="nameInput" class="portal-input" placeholder="e.g. Zhang San / Procurement">
 
-        <button class="btn primary block" id="submitBtn" style="margin-top: 14px;">
-          🚀 提交到 AiCFO
+        <button class="portal-btn primary block" id="submitBtn" style="margin-top: 16px;">
+          <span data-i18n="portal.submit">🚀 Submit to AiCFO</span>
         </button>
       </div>
 
@@ -177,35 +267,92 @@
       <div class="card">
         <div class="status err">
           <span class="emoji">🚫</span>
-          <div id="errorMsg">链接无效或已过期</div>
+          <div id="errorMsg">Link invalid or expired</div>
         </div>
       </div>
     </div>
 
     <div class="footer">
-      Powered by <a href="/">AiCFO</a> · 数据加密传输 · SFRS / GST 合规
+      Powered by <a href="/">AiCFO</a> · <span data-i18n="portal.footer">Encrypted transit · SFRS / GST compliant</span>
     </div>
   </div>
 
 <script>
 (function () {
+  // ================= i18n (upload portal 独立轻量 i18n) =================
+  const I18N_TABLE = {
+    'portal.sub':         { en: 'AI auto-classify · auto-bookkeeping · SFRS / GST compliant', zh: 'AI 自动识别 · 自动记账 · 新加坡 SFRS / GST 合规' },
+    'portal.uploadTo':    { en: 'Upload to', zh: '上传到' },
+    'portal.link':        { en: 'Link',     zh: '链接' },
+    'portal.used':        { en: 'Used',     zh: '已使用' },
+    'portal.loading':     { en: 'Loading…', zh: '加载中…' },
+    'portal.hint':        { en: 'Tip: tap 📷 to scan receipts, or paste a screenshot. AI auto-classifies invoice / bank transaction / report.',
+                            zh: '小贴士：点击 📷 直接拍摄小票，或粘贴截图。AI 会自动识别发票 / 银行流水 / 报告。' },
+    'portal.title':       { en: '📸 Upload Invoice / Bill / Bank Statement', zh: '📸 上传发票 / 账单 / 银行流水' },
+    'portal.drop.big':    { en: 'Tap or drop file here', zh: '点击或拖入文件' },
+    'portal.drop.small':  { en: 'JPG / PNG / PDF / CSV / XLSX · max 20 MB each · up to 10 files',
+                            zh: '支持 JPG / PNG / PDF / CSV / XLSX · 单文件最大 20MB · 最多 10 个' },
+    'portal.camera':      { en: '📷 Take Photo', zh: '📷 拍照' },
+    'portal.gallery':     { en: '🖼️ From Gallery', zh: '🖼️ 从相册' },
+    'portal.note':        { en: 'Note (optional)', zh: '备注（可选）' },
+    'portal.yourName':    { en: 'Your name (optional)', zh: '您是（可选）' },
+    'portal.submit':      { en: '🚀 Submit to AiCFO', zh: '🚀 提交到 AiCFO' },
+    'portal.footer':      { en: 'Encrypted transit · SFRS / GST compliant', zh: '数据加密传输 · SFRS / GST 合规' },
+    'portal.submitting':  { en: '🤖 AI is classifying & booking…', zh: '🤖 AI 正在识别并入账…' },
+    'portal.submittingDetail': { en: 'Takes about 3–8 seconds', zh: '大约需要 3-8 秒' },
+    'portal.retry':       { en: '🚀 Retry', zh: '🚀 重试' },
+    'portal.again':       { en: 'Upload another batch', zh: '再传一批' },
+    'portal.pickAtLeast': { en: 'Please select at least one file or enter a note.', zh: '请至少选择一个文件或填写备注。' },
+    'portal.tooLarge':    { en: 'File exceeds 20 MB:', zh: '文件超过 20MB：' },
+    'portal.invalid':     { en: 'Link invalid or expired', zh: '链接无效或已过期' },
+    'portal.network':     { en: 'Network error:', zh: '网络异常：' },
+    'portal.classified':  { en: 'classified as', zh: '分类' },
+    'portal.booked':      { en: 'booked', zh: '已建档' },
+    'portal.records':     { en: 'record(s)', zh: '条记录' },
+    'portal.took':        { en: 'took', zh: '用时' },
+  };
+  const CLS_LABEL = {
+    invoice:  { en: 'Invoice',          zh: '发票' },
+    bank_txn: { en: 'Bank Transaction', zh: '银行流水' },
+    receipt:  { en: 'Receipt',          zh: '收据' },
+    report:   { en: 'Report',           zh: '报告' },
+    other:    { en: 'Other',            zh: '其他' },
+  };
+  let LOCALE = (localStorage.getItem('aicfo_locale') || (navigator.language || 'en').toLowerCase().startsWith('zh') ? 'zh' : 'en');
+  function t(k) { return (I18N_TABLE[k] && I18N_TABLE[k][LOCALE]) || k; }
+  function applyI18n() {
+    document.documentElement.lang = LOCALE === 'zh' ? 'zh-CN' : 'en';
+    document.querySelectorAll('[data-i18n]').forEach(el => {
+      const k = el.getAttribute('data-i18n');
+      if (I18N_TABLE[k]) el.textContent = I18N_TABLE[k][LOCALE];
+    });
+    document.getElementById('langLbl').textContent = LOCALE === 'zh' ? 'EN' : '中';
+    document.title = LOCALE === 'zh' ? 'AiCFO · 上传账单' : 'AiCFO · Upload';
+  }
+  window.togglePortalLang = function () {
+    LOCALE = (LOCALE === 'zh' ? 'en' : 'zh');
+    localStorage.setItem('aicfo_locale', LOCALE);
+    applyI18n();
+  };
+  applyI18n();
+
+  // ================= 业务逻辑 =================
   const TOKEN = location.pathname.split('/')[2] || '';
   const API = '/api';
 
   const el  = (id) => document.getElementById(id);
-  const metaBox      = el('metaBox');
-  const metaCompany  = el('metaCompany');
-  const metaLabel    = el('metaLabel');
-  const metaUsage    = el('metaUsage');
-  const mainBox      = el('mainBox');
-  const errorBox     = el('errorBox');
-  const errorMsg     = el('errorMsg');
-  const drop         = el('drop');
-  const filePick     = el('filePick');
-  const cameraPick   = el('cameraPick');
-  const fileList     = el('fileList');
-  const submitBtn    = el('submitBtn');
-  const statusBox    = el('statusBox');
+  const metaCompany = el('metaCompany');
+  const metaLabel   = el('metaLabel');
+  const metaUsage   = el('metaUsage');
+  const mainBox     = el('mainBox');
+  const errorBox    = el('errorBox');
+  const errorMsg    = el('errorMsg');
+  const drop        = el('drop');
+  const filePick    = el('filePick');
+  const cameraPick  = el('cameraPick');
+  const fileList    = el('fileList');
+  const submitBtn   = el('submitBtn');
+  const statusBox   = el('statusBox');
 
   let files = [];
 
@@ -216,18 +363,18 @@
       if (!d || !d.ok) {
         mainBox.classList.add('hide');
         errorBox.classList.remove('hide');
-        errorMsg.textContent = d?.error || '链接无效或已过期';
+        errorMsg.textContent = d?.error || t('portal.invalid');
         return;
       }
       metaCompany.textContent = d.company_name || 'AiCFO';
-      metaLabel.textContent   = d.label || '上传链接';
+      metaLabel.textContent   = d.label || '—';
       const max = d.max_uploads > 0 ? d.max_uploads : '∞';
       metaUsage.textContent   = `${d.uploads_count || 0} / ${max}`;
     })
     .catch(e => {
       mainBox.classList.add('hide');
       errorBox.classList.remove('hide');
-      errorMsg.textContent = '网络异常：' + e.message;
+      errorMsg.textContent = t('portal.network') + ' ' + e.message;
     });
 
   // ---- 2. 文件拖拽 + 选择 ----
@@ -241,7 +388,7 @@
   filePick.addEventListener('change', (e) => addFiles(e.target.files));
   cameraPick.addEventListener('change', (e) => addFiles(e.target.files));
 
-  // 粘贴截图（桌面）
+  // 粘贴截图
   window.addEventListener('paste', (e) => {
     const items = (e.clipboardData || {}).items || [];
     const pasted = [];
@@ -257,7 +404,7 @@
   function addFiles(list) {
     for (const f of list) {
       if (files.length >= 10) break;
-      if (f.size > 20 * 1024 * 1024) { alert(`文件超过 20MB：${f.name}`); continue; }
+      if (f.size > 20 * 1024 * 1024) { alert(t('portal.tooLarge') + ' ' + f.name); continue; }
       files.push(f);
     }
     renderList();
@@ -291,14 +438,14 @@
   // ---- 3. 提交 ----
   submitBtn.addEventListener('click', async () => {
     const note = el('noteInput').value.trim();
-    if (!files.length && !note) { alert('请至少选择 1 个文件或填写备注'); return; }
+    if (!files.length && !note) { alert(t('portal.pickAtLeast')); return; }
 
     submitBtn.disabled = true;
-    submitBtn.innerHTML = '⏳ 上传中…';
+    submitBtn.innerHTML = '<span>⏳</span>';
 
-    statusBox.innerHTML = `<div class="card"><div class="status loading pulsing">
-      <span class="emoji">🤖</span>AI 正在识别并入账…
-      <div class="detail">大约需要 3-8 秒</div></div></div>`;
+    statusBox.innerHTML = `<div class="status loading pulsing">
+      <span class="emoji">🤖</span>${t('portal.submitting')}
+      <div class="detail">${t('portal.submittingDetail')}</div></div>`;
 
     const fd = new FormData();
     files.forEach(f => fd.append('files', f, f.name));
@@ -313,35 +460,35 @@
 
       if (d.ok) {
         const cls = d.classified_as || 'other';
-        const zh  = { invoice:'发票', bank_txn:'银行流水', receipt:'收据', report:'报告', other:'其他' }[cls] || cls;
-        statusBox.innerHTML = `<div class="card"><div class="status ok">
+        const clsLabel = (CLS_LABEL[cls] && CLS_LABEL[cls][LOCALE]) || cls;
+        statusBox.innerHTML = `<div class="status ok">
           <span class="emoji">✅</span>
-          <div><strong>${d.reply || ('✓ 已收到 ' + (d.file_count || 0) + ' 个文件')}</strong></div>
-          <div class="detail">分类：${zh} · 已建档 ${d.linked_entity_ids?.length || 0} 条记录 · 用时 ${dur}s</div>
-          <div style="margin-top:12px;"><button class="btn primary" id="resetBtn">再传一批</button></div>
-        </div></div>`;
+          <div style="font-weight:700">${d.reply || ('✓ ' + (d.file_count || 0))}</div>
+          <div class="detail">${t('portal.classified')}: <b>${clsLabel}</b> · ${t('portal.booked')} ${d.linked_entity_ids?.length || 0} ${t('portal.records')} · ${t('portal.took')} ${dur}s</div>
+          <div style="margin-top:14px;"><button class="portal-btn primary" id="resetBtn" style="display:inline-flex;padding:10px 22px">${t('portal.again')}</button></div>
+        </div>`;
         el('resetBtn').onclick = () => {
           files = []; renderList();
           el('noteInput').value = ''; el('nameInput').value = '';
           statusBox.innerHTML = '';
           submitBtn.disabled = false;
-          submitBtn.innerHTML = '🚀 提交到 AiCFO';
+          submitBtn.innerHTML = `<span>${t('portal.submit')}</span>`;
         };
       } else {
-        statusBox.innerHTML = `<div class="card"><div class="status err">
+        statusBox.innerHTML = `<div class="status err">
           <span class="emoji">❌</span>
-          <div>${d.error || '提交失败'}</div>
-          <div class="detail">用时 ${dur}s</div>
-        </div></div>`;
+          <div>${d.error || 'Submit failed'}</div>
+          <div class="detail">${t('portal.took')} ${dur}s</div>
+        </div>`;
         submitBtn.disabled = false;
-        submitBtn.innerHTML = '🚀 重试';
+        submitBtn.innerHTML = `<span>${t('portal.retry')}</span>`;
       }
     } catch (e) {
-      statusBox.innerHTML = `<div class="card"><div class="status err">
-        <span class="emoji">🚫</span>网络错误：${escapeHtml(e.message)}
-      </div></div>`;
+      statusBox.innerHTML = `<div class="status err">
+        <span class="emoji">🚫</span>${t('portal.network')} ${escapeHtml(e.message)}
+      </div>`;
       submitBtn.disabled = false;
-      submitBtn.innerHTML = '🚀 重试';
+      submitBtn.innerHTML = `<span>${t('portal.retry')}</span>`;
     }
   });
 })();

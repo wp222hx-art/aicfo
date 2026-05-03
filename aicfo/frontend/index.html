@@ -2,7 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#2563eb" />
+<meta name="description" content="AiCFO — AI-First Corporate Brain for Singapore SMEs. Bookkeeping, Tax, Reports, AI Chat." />
 <title>AiCFO — Your AI-First Corporate Brain in Singapore</title>
 <link rel="stylesheet" href="/styles/app.css" />
 </head>
@@ -17,37 +19,44 @@
         <div class="brand-tag" data-i18n="brand.tag">Corporate Brain · Singapore</div>
       </div>
     </div>
-    <nav class="nav">
-      <a data-route="dashboard" data-i18n="nav.dashboard" onclick="nav('dashboard')">Dashboard</a>
-      <a data-route="register" data-i18n="nav.register" onclick="nav('register')">Register</a>
-      <a data-route="books" data-i18n="nav.books" onclick="nav('books')">Books</a>
-      <a data-route="reports" data-i18n="nav.reports" onclick="nav('reports')">Reports</a>
-      <a data-route="monthly" data-i18n="nav.monthly" onclick="nav('monthly')">Monthly</a>
-      <a data-route="tax" data-i18n="nav.tax" onclick="nav('tax')">Tax</a>
-      <a data-route="secretary" data-i18n="nav.secretary" onclick="nav('secretary')">Secretary</a>
-      <a data-route="chat" data-i18n="nav.chat" onclick="nav('chat')">AI Chat</a>
-      <a data-route="pricing" data-i18n="nav.pricing" onclick="nav('pricing')">Pricing</a>
-      <div style="margin:8px 14px;border-top:1px solid rgba(255,255,255,0.15)"></div>
-      <a data-route="signup" onclick="nav('signup')">🚀 注册</a>
-      <a data-route="plans" onclick="nav('plans')">💳 选套餐 / 支付</a>
-      <a data-route="wa" onclick="nav('wa')">📱 我的 WhatsApp 渠道</a>
-      <a data-route="myArchive" onclick="nav('myArchive')" style="background:linear-gradient(90deg,rgba(16,185,129,0.15),transparent);font-weight:600">📚 我的企业档案</a>
+
+    <button class="burger" id="burger" onclick="toggleNav()" aria-label="Menu"><span></span></button>
+
+    <nav class="nav" id="mainNav">
+      <a data-route="dashboard" data-i18n="nav.dashboard" onclick="nav('dashboard');closeNav()">📊 Dashboard</a>
+      <a data-route="myArchive"  data-i18n="nav.myArchive"  onclick="nav('myArchive');closeNav()">📚 My Archive</a>
+      <a data-route="register"  data-i18n="nav.register"  onclick="nav('register');closeNav()">🏢 Register</a>
+      <a data-route="books"     data-i18n="nav.books"     onclick="nav('books');closeNav()">📘 Books</a>
+      <a data-route="reports"   data-i18n="nav.reports"   onclick="nav('reports');closeNav()">📈 Reports</a>
+      <a data-route="monthly"   data-i18n="nav.monthly"   onclick="nav('monthly');closeNav()">🗓️ Monthly</a>
+      <a data-route="tax"       data-i18n="nav.tax"       onclick="nav('tax');closeNav()">🏛️ Tax</a>
+      <a data-route="secretary" data-i18n="nav.secretary" onclick="nav('secretary');closeNav()">🧑‍💼 Secretary</a>
+      <a data-route="chat"      data-i18n="nav.chat"      onclick="nav('chat');closeNav()">💬 AI Chat</a>
+      <a data-route="pricing"   data-i18n="nav.pricing"   onclick="nav('pricing');closeNav()">💳 Pricing</a>
+      <a data-route="wa"        data-i18n="nav.wa"        onclick="nav('wa');closeNav()">📱 WhatsApp</a>
     </nav>
-    <button class="lang-toggle" id="langToggle" onclick="I18N.toggleLocale()" title="Switch language / 切换语言">
+
+    <button class="lang-toggle hide-sm" id="langToggle" onclick="I18N.toggleLocale()" title="Switch language / 切换语言">
       <span>🌐</span> <span id="langLabel" data-i18n="lang.toggle">中文</span>
     </button>
     <div class="user-chip" id="userChip">
       <span class="avatar">JC</span>
-      <div>
+      <div class="hide-sm">
         <div class="user-name" id="userName">James Chen</div>
-        <div class="user-role" id="userRole">Skyhawk Innovate Pte Ltd</div>
+        <div class="user-role" id="userRole">Skyhawk Innovate</div>
       </div>
-      <a class="admin-link" href="/admin/" data-i18n="nav.admin">Admin →</a>
+      <a class="admin-link hide-sm" href="/admin/" data-i18n="nav.admin">Admin →</a>
     </div>
   </header>
 
   <main id="view"></main>
 </div>
+
+<script>
+  function toggleNav() { document.getElementById('mainNav').classList.toggle('open'); }
+  function closeNav()  { document.getElementById('mainNav').classList.remove('open'); }
+  window.toggleNav = toggleNav; window.closeNav = closeNav;
+</script>
 <script src="/assets/i18n.js"></script>
 <script src="/assets/app.js"></script>
 </body>
