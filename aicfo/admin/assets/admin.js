@@ -1102,9 +1102,9 @@ async function llmGateway() {
       </div>
 
       <div style="margin-top:20px;display:flex;gap:10px;flex-wrap:wrap">
-        <button class="btn btn-primary" onclick="saveLlmGateway()">💾 保存配置</button>
-        <button class="btn" onclick="testLlmGateway('fast')">⚡ 测试连通 (fast)</button>
-        <button class="btn" onclick="testLlmGateway('reasoning')">🧠 测试连通 (reasoning)</button>
+        <button class="btn btn-primary" onclick="saveLlmGateway(this)">💾 保存配置</button>
+        <button class="btn" onclick="testLlmGateway('fast',this)">⚡ 测试连通 (fast)</button>
+        <button class="btn" onclick="testLlmGateway('reasoning',this)">🧠 测试连通 (reasoning)</button>
         <button class="btn" onclick="anav('llmGateway')">🔄 刷新</button>
       </div>
       <div id="gw_test_result" class="mt-20"></div>
@@ -1122,7 +1122,28 @@ async function llmGateway() {
     </div>`;
 }
 
-window.saveLlmGateway = async function () {
+// Lightweight toast (fixed top-right, auto-dismiss 3s)
+window.gwToast = function (msg, type = 'ok') {
+  let box = document.getElementById('gw_toast_box');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'gw_toast_box';
+    box.style.cssText = 'position:fixed;top:20px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:8px';
+    document.body.appendChild(box);
+  }
+  const el = document.createElement('div');
+  const color = type === 'ok' ? '#10b981' : type === 'err' ? '#ef4444' : '#0ea5e9';
+  el.style.cssText = `background:#fff;border-left:4px solid ${color};padding:12px 18px;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.15);font-size:13px;max-width:420px;animation:slideIn .3s ease`;
+  el.innerHTML = msg;
+  box.appendChild(el);
+  setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; setTimeout(() => el.remove(), 300); }, 3000);
+};
+
+window.saveLlmGateway = async function (btn) {
+  const button = btn || event?.target;
+  const origText = button ? button.innerHTML : '';
+  if (button) { button.disabled = true; button.innerHTML = '⏳ 保存中…'; }
+
   const patch = {
     provider: document.getElementById('gw_provider').value,
     base_url: document.getElementById('gw_base_url').value.trim(),
@@ -1141,35 +1162,61 @@ window.saveLlmGateway = async function () {
   if (k) patch.api_key = k;
 
   try {
-    await api('/admin/llm/config', { method: 'POST', body: JSON.stringify(patch) });
-    if (typeof toast === 'function') toast('✓ 配置已保存');
-    anav('llmGateway');
+    const r = await api('/admin/llm/config', { method: 'POST', body: JSON.stringify(patch) });
+    if (button) { button.innerHTML = '✓ 已保存'; button.style.background = '#10b981'; }
+    window.gwToast(`✓ 配置已保存 · provider=<b>${esc(r.config?.provider || '-')}</b> · ${k ? 'API Key 已更新' : 'API Key 未变'}`, 'ok');
+    setTimeout(() => anav('llmGateway'), 800);
   } catch (e) {
-    alert('保存失败：' + e.message);
+    if (button) { button.disabled = false; button.innerHTML = origText; }
+    window.gwToast(`✗ 保存失败：${esc(e.message)}`, 'err');
   }
 };
 
-window.testLlmGateway = async function (tier) {
+window.testLlmGateway = async function (tier, btn) {
+  const button = btn || event?.target;
+  const origText = button ? button.innerHTML : '';
+  if (button) { button.disabled = true; button.innerHTML = `⏳ ${tier} 测试中…`; }
+
   const box = document.getElementById('gw_test_result');
-  box.innerHTML = `<div class="muted">⏳ 正在向 ${tier} 模型发送 ping…</div>`;
+  const t0 = Date.now();
+  box.innerHTML = `
+    <div class="alert" style="background:#eff6ff;border-left:4px solid #0ea5e9;padding:12px">
+      <b style="color:#075985">⏳ 正在向 <code>${esc(tier)}</code> tier 发送 ping…</b><br/>
+      <span class="muted" style="font-size:12px">真实调用 Tokenhot.ai，通常需要 2-5 秒，请稍候…</span>
+      <div id="gw_test_timer" class="muted" style="font-size:11px;margin-top:4px">已用时 0s</div>
+    </div>`;
+  const timer = setInterval(() => {
+    const el = document.getElementById('gw_test_timer');
+    if (el) el.textContent = `已用时 ${((Date.now() - t0) / 1000).toFixed(1)}s`;
+  }, 100);
+
   try {
     const r = await api('/admin/llm/test', { method: 'POST', body: JSON.stringify({ tier }) });
+    clearInterval(timer);
+    const latency = r.latency_ms ?? r.latency ?? (Date.now() - t0);
     if (r.ok) {
       box.innerHTML = `
         <div class="alert" style="background:#ecfdf5;border-left:4px solid #10b981;padding:12px">
-          <b style="color:#065f46">✓ 连通成功</b><br/>
-          provider=<code>${esc(r.provider)}</code> · model=<code>${esc(r.model)}</code> ·
-          latency=<b>${r.latency_ms}ms</b><br/>
-          reply: <code>${esc(r.reply || '')}</code>
+          <b style="color:#065f46">✓ 连通成功</b> · tier=<code>${esc(tier)}</code><br/>
+          provider=<code>${esc(r.provider || '-')}</code> ·
+          model=<code>${esc(r.model || '-')}</code> ·
+          latency=<b>${latency} ms</b><br/>
+          reply: <code style="background:#fff;padding:2px 6px;border-radius:3px">${esc(r.reply || '')}</code>
         </div>`;
+      window.gwToast(`✓ ${tier} 连通成功 · ${latency}ms · ${esc(r.model)}`, 'ok');
     } else {
       box.innerHTML = `
         <div class="alert" style="background:#fef2f2;border-left:4px solid #ef4444;padding:12px">
           <b style="color:#991b1b">✗ 连通失败</b><br/>
           ${esc(r.error || 'unknown error')}
         </div>`;
+      window.gwToast(`✗ ${tier} 连通失败`, 'err');
     }
   } catch (e) {
-    box.innerHTML = `<div style="color:#ef4444">请求失败：${esc(e.message)}</div>`;
+    clearInterval(timer);
+    box.innerHTML = `<div style="color:#ef4444;padding:12px;background:#fef2f2;border-left:4px solid #ef4444">请求失败：${esc(e.message)}</div>`;
+    window.gwToast(`✗ 请求失败：${esc(e.message)}`, 'err');
+  } finally {
+    if (button) { button.disabled = false; button.innerHTML = origText; }
   }
 };

@@ -181,3 +181,26 @@ tr:hover td { background: #fafbfc; }
   .chat-wrap { grid-template-columns: 1fr; height: auto; }
   main { padding: 16px; }
 }
+
+/* ===== LLM Gateway UI enhancements ===== */
+@keyframes slideIn {
+  from { transform: translateX(20px); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+.btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+.btn {
+  transition: background 0.2s, opacity 0.2s, transform 0.1s;
+}
+.btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+.alert code {
+  background: #fff;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 12px;
+}
