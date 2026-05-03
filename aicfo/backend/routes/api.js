@@ -1422,11 +1422,67 @@ router.get('/admin/archive/company/:id/history',  (req, res) => res.json({ ok: t
 router.get('/admin/archive/company/:id/billing',  (req, res) => res.json({ ok: true, data: archive.getSubscriptionAndPayments(req.params.id) }));
 router.get('/admin/archive/company/:id/timeline', (req, res) => res.json({ ok: true, data: archive.getTimeline(req.params.id, { limit: +req.query.limit || 100 }) }));
 
-// 档案快照（写入 documents 表，kind='archive_snapshot'）
+// 档案快照（真打快照：JSON + CSV + HTML 全部落盘 + 写 documents 表）
 router.post('/admin/archive/company/:id/snapshot', (req, res) => {
   try {
     const r = archive.createSnapshot(req.params.id, { snapshot_name: req.body?.name, created_by: req.body?.created_by });
     res.json(r);
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// 快照列表
+router.get('/admin/archive/company/:id/snapshots', (req, res) => {
+  try {
+    res.json({ ok: true, data: archive.listSnapshots(req.params.id) });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// 快照对比 (?a=snap_xxx&b=snap_yyy)
+router.get('/admin/archive/company/:id/snapshot/diff', (req, res) => {
+  try {
+    const { a, b } = req.query;
+    if (!a || !b) return res.status(400).json({ ok: false, error: 'a and b are required' });
+    res.json(archive.diffSnapshots(req.params.id, a, b));
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// 快照文件下载 (archive.json/archive.csv/archive.html)
+router.get('/admin/archive/company/:id/snapshot/:snap_id/:fname', (req, res) => {
+  try {
+    const r = archive.getSnapshotFile(req.params.id, req.params.snap_id, req.params.fname);
+    if (!r) return res.status(404).send('snapshot file not found');
+    const fname = req.params.fname;
+    if (fname.endsWith('.json')) res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    else if (fname.endsWith('.csv')) {
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${fname}"`);
+    }
+    else if (fname.endsWith('.html')) res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(r.content);
+  } catch (e) { res.status(500).send('download failed: ' + e.message); }
+});
+
+// ---------- 档案分析聚合（供应商/分类/月份/饼图） ----------
+router.get('/admin/archive/company/:id/analytics', (req, res) => {
+  try {
+    const year = req.query.year || null;
+    res.json({ ok: true, data: archive.getAnalytics(req.params.id, { year }) });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ---------- 档案筛选消费（按年/月/供应商） ----------
+router.get('/admin/archive/company/:id/expenses-filtered', (req, res) => {
+  try {
+    const { year, month, vendor, limit } = req.query;
+    res.json({
+      ok: true,
+      data: archive.getExpensesFiltered(req.params.id, {
+        year: year || null,
+        month: month || null,
+        vendor: vendor || null,
+        limit: +limit || 500,
+      }),
+    });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 

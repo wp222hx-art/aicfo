@@ -360,21 +360,171 @@ function listAllCompaniesWithSummary({ limit = 200 } = {}) {
   return rows.map(r => getSummary(r.id)).filter(Boolean);
 }
 
-// ---------- 11. 档案快照（冻结当前时刻的档案，写入 documents 表） ----------
+// ---------- 11. 档案快照（真打快照：JSON + CSV + HTML 全部落盘 + 写 documents 表） ----------
 function createSnapshot(company_id, { snapshot_name = null, created_by = null } = {}) {
   const archive = getFullArchive(company_id);
   if (!archive) throw new Error('company not found');
   const { v4: uuid } = require('uuid');
-  const id = 'doc_snap_' + uuid().slice(0, 8);
-  const name = snapshot_name || `Archive Snapshot ${new Date().toISOString().slice(0, 19)}`;
+  const fs = require('fs');
+  const path = require('path');
 
-  // 把完整档案 JSON 存到 documents 表（kind=archive_snapshot）
-  const json = JSON.stringify(archive);
+  const snapshotId = 'snap_' + uuid().slice(0, 8);
+  const ts = new Date();
+  const name = snapshot_name || `${archive.company.name || company_id} · ${ts.toISOString().slice(0, 19)}`;
+
+  // 确保快照目录
+  const snapDir = path.join(__dirname, '..', '..', 'data', 'snapshots', company_id, snapshotId);
+  fs.mkdirSync(snapDir, { recursive: true });
+
+  // 生成三种产物
+  const json = JSON.stringify(archive, null, 2);
+  const csv  = exportCSV(company_id);
+  const html = exportPrintableHTML(company_id);
+
+  // 写文件
+  const jsonPath = path.join(snapDir, 'archive.json');
+  const csvPath  = path.join(snapDir, 'archive.csv');
+  const htmlPath = path.join(snapDir, 'archive.html');
+  fs.writeFileSync(jsonPath, json, 'utf-8');
+  fs.writeFileSync(csvPath, '\uFEFF' + csv, 'utf-8'); // BOM for Excel
+  fs.writeFileSync(htmlPath, html, 'utf-8');
+
+  // 计算摘要指标（写入 content 让后续对比更快）
+  const s = (archive.summary && archive.summary.stats) || {};
+  const summaryForDiff = {
+    snapshot_id: snapshotId,
+    snapshot_name: name,
+    created_at: ts.toISOString(),
+    created_by,
+    json_bytes: json.length,
+    csv_bytes: csv.length,
+    html_bytes: html.length,
+    metrics: {
+      transactions: s.transactions || 0,
+      revenue: s.revenue || 0,
+      expense: s.expense || 0,
+      invoice_count: s.invoices || 0,
+      invoice_total: s.invoice_total || 0,
+      document_count: s.documents || 0,
+      tax_filings: s.tax_filings || 0,
+      upload_submissions: s.upload_submissions || 0,
+      last_activity_at: archive.summary?.last_activity_at || null,
+    },
+  };
+
+  // 写 documents 表（一行记录代表一次快照，JSON content 含 metrics + file paths）
+  const docId = 'doc_' + snapshotId;
+  const content = JSON.stringify({
+    ...summaryForDiff,
+    files: {
+      json: `/api/admin/archive/company/${company_id}/snapshot/${snapshotId}/archive.json`,
+      csv:  `/api/admin/archive/company/${company_id}/snapshot/${snapshotId}/archive.csv`,
+      html: `/api/admin/archive/company/${company_id}/snapshot/${snapshotId}/archive.html`,
+    },
+  });
   db.prepare(`
     INSERT INTO documents(id, company_id, kind, version, file_path, content, generated_by_ai, created_at)
     VALUES(?, ?, 'archive_snapshot', 1, ?, ?, 0, CURRENT_TIMESTAMP)
-  `).run(id, company_id, `archive://${company_id}/${id}`, json);
-  return { ok: true, snapshot_id: id, name, size_bytes: json.length };
+  `).run(docId, company_id, snapDir, content);
+
+  return {
+    ok: true,
+    snapshot_id: snapshotId,
+    name,
+    created_at: ts.toISOString(),
+    size_bytes: json.length,
+    csv_bytes: csv.length,
+    html_bytes: html.length,
+    files: {
+      json: `/api/admin/archive/company/${company_id}/snapshot/${snapshotId}/archive.json`,
+      csv:  `/api/admin/archive/company/${company_id}/snapshot/${snapshotId}/archive.csv`,
+      html: `/api/admin/archive/company/${company_id}/snapshot/${snapshotId}/archive.html`,
+    },
+    metrics: summaryForDiff.metrics,
+  };
+}
+
+// ---------- 11b. 快照列表 ----------
+function listSnapshots(company_id) {
+  const rows = db.prepare(`
+    SELECT id, file_path, content, created_at
+    FROM documents
+    WHERE company_id=? AND kind='archive_snapshot'
+    ORDER BY created_at DESC
+    LIMIT 200
+  `).all(company_id);
+  return rows.map(r => {
+    let meta = null;
+    try { meta = JSON.parse(r.content || '{}'); } catch (e) { meta = {}; }
+    return {
+      doc_id: r.id,
+      snapshot_id: meta.snapshot_id || r.id,
+      name: meta.snapshot_name || r.id,
+      created_at: meta.created_at || r.created_at,
+      created_by: meta.created_by || null,
+      json_bytes: meta.json_bytes || 0,
+      csv_bytes: meta.csv_bytes || 0,
+      html_bytes: meta.html_bytes || 0,
+      metrics: meta.metrics || null,
+      files: meta.files || null,
+      file_path: r.file_path,
+    };
+  });
+}
+
+// ---------- 11c. 读取快照原始 JSON 用于对比 ----------
+function getSnapshotArchive(company_id, snapshot_id) {
+  const fs = require('fs');
+  const path = require('path');
+  const row = db.prepare(`
+    SELECT file_path, content FROM documents
+    WHERE company_id=? AND kind='archive_snapshot' AND (id=? OR id='doc_'||?)
+    LIMIT 1
+  `).get(company_id, snapshot_id, snapshot_id);
+  if (!row) return null;
+  const jsonPath = path.join(row.file_path, 'archive.json');
+  if (!fs.existsSync(jsonPath)) return null;
+  try { return JSON.parse(fs.readFileSync(jsonPath, 'utf-8')); }
+  catch (e) { return null; }
+}
+
+// ---------- 11d. 比较两个快照 ----------
+function diffSnapshots(company_id, snap_a_id, snap_b_id) {
+  const list = listSnapshots(company_id);
+  const a = list.find(s => s.snapshot_id === snap_a_id || s.doc_id === snap_a_id);
+  const b = list.find(s => s.snapshot_id === snap_b_id || s.doc_id === snap_b_id);
+  if (!a || !b) return { ok: false, error: 'snapshot not found' };
+  const mA = a.metrics || {};
+  const mB = b.metrics || {};
+  const keys = ['transactions', 'revenue', 'expense', 'invoice_count', 'invoice_total', 'document_count', 'tax_filings', 'upload_submissions'];
+  const diff = keys.map(k => ({
+    metric: k,
+    a: mA[k] || 0,
+    b: mB[k] || 0,
+    delta: (mB[k] || 0) - (mA[k] || 0),
+  }));
+  return {
+    ok: true,
+    a: { snapshot_id: a.snapshot_id, name: a.name, created_at: a.created_at, metrics: mA },
+    b: { snapshot_id: b.snapshot_id, name: b.name, created_at: b.created_at, metrics: mB },
+    diff,
+  };
+}
+
+// ---------- 11e. 返回快照文件（JSON/CSV/HTML）----------
+function getSnapshotFile(company_id, snapshot_id, fname) {
+  const fs = require('fs');
+  const path = require('path');
+  if (!['archive.json', 'archive.csv', 'archive.html'].includes(fname)) return null;
+  const row = db.prepare(`
+    SELECT file_path FROM documents
+    WHERE company_id=? AND kind='archive_snapshot' AND (id=? OR id='doc_'||?)
+    LIMIT 1
+  `).get(company_id, snapshot_id, snapshot_id);
+  if (!row) return null;
+  const fp = path.join(row.file_path, fname);
+  if (!fs.existsSync(fp)) return null;
+  return { path: fp, content: fs.readFileSync(fp, 'utf-8') };
 }
 
 module.exports = {
@@ -389,9 +539,156 @@ module.exports = {
   getFullArchive,
   listAllCompaniesWithSummary,
   createSnapshot,
+  listSnapshots,
+  getSnapshotArchive,
+  diffSnapshots,
+  getSnapshotFile,
   exportCSV,
   exportPrintableHTML,
+  getAnalytics,
+  getExpensesFiltered,
 };
+
+// ---------- 14. 按年/月筛选消费记录 ----------
+function getExpensesFiltered(company_id, { year = null, month = null, vendor = null, limit = 500 } = {}) {
+  const whereParts = ['company_id=?'];
+  const params = [company_id];
+  if (year) {
+    whereParts.push(`(strftime('%Y', COALESCE(transaction_date, created_at))=? OR strftime('%Y', created_at)=?)`);
+    params.push(String(year), String(year));
+  }
+  if (month && year) {
+    const mm = String(month).padStart(2, '0');
+    whereParts.push(`(strftime('%m', COALESCE(transaction_date, created_at))=? OR strftime('%m', created_at)=?)`);
+    params.push(mm, mm);
+  }
+  const txnWhere = whereParts.join(' AND ');
+  const transactions = db.prepare(
+    `SELECT * FROM transactions WHERE ${txnWhere} ORDER BY COALESCE(transaction_date, created_at) DESC LIMIT ?`
+  ).all(...params, limit);
+
+  // 发票: 用 issue_date 筛选
+  const invParts = ['company_id=?'];
+  const invParams = [company_id];
+  if (year) {
+    invParts.push(`(strftime('%Y', COALESCE(issue_date, created_at))=? OR strftime('%Y', created_at)=?)`);
+    invParams.push(String(year), String(year));
+  }
+  if (month && year) {
+    const mm = String(month).padStart(2, '0');
+    invParts.push(`(strftime('%m', COALESCE(issue_date, created_at))=? OR strftime('%m', created_at)=?)`);
+    invParams.push(mm, mm);
+  }
+  if (vendor) {
+    invParts.push(`vendor_name LIKE ?`);
+    invParams.push(`%${vendor}%`);
+  }
+  const invoices = db.prepare(
+    `SELECT * FROM invoices WHERE ${invParts.join(' AND ')} ORDER BY COALESCE(issue_date, created_at) DESC LIMIT ?`
+  ).all(...invParams, limit);
+
+  return { transactions, invoices, filter: { year, month, vendor } };
+}
+
+// ---------- 15. 分析聚合：按供应商 + 按分类 + 按月份 + 可用年份 ----------
+function getAnalytics(company_id, { year = null } = {}) {
+  // 可用的年份列表（用于下拉）
+  const yearsRaw = db.prepare(`
+    SELECT DISTINCT y FROM (
+      SELECT strftime('%Y', COALESCE(issue_date, created_at)) AS y FROM invoices WHERE company_id=?
+      UNION
+      SELECT strftime('%Y', COALESCE(transaction_date, created_at)) AS y FROM transactions WHERE company_id=?
+    ) WHERE y IS NOT NULL ORDER BY y DESC
+  `).all(company_id, company_id);
+  const years = yearsRaw.map(r => r.y).filter(Boolean);
+
+  // 年份过滤条件
+  const yf = year ? `AND strftime('%Y', COALESCE(issue_date, created_at))='${year}'` : '';
+  const ytf = year ? `AND strftime('%Y', COALESCE(transaction_date, created_at))='${year}'` : '';
+
+  // 1) 按供应商汇总 (invoices.vendor_name)
+  const byVendor = db.prepare(`
+    SELECT
+      COALESCE(TRIM(vendor_name), '(未知)') AS vendor,
+      COUNT(*) AS count,
+      COALESCE(SUM(total), 0) AS total_amount,
+      COALESCE(SUM(gst_amount), 0) AS total_gst,
+      COALESCE(AVG(total), 0) AS avg_amount,
+      MAX(issue_date) AS last_invoice_date
+    FROM invoices WHERE company_id=? ${yf}
+    GROUP BY COALESCE(TRIM(vendor_name), '(未知)')
+    ORDER BY total_amount DESC
+    LIMIT 50
+  `).all(company_id);
+
+  // 2) 按分类（wa_messages.classified_as + documents.kind）汇总
+  const byCategory = db.prepare(`
+    SELECT classified_as AS category, COUNT(*) AS count
+    FROM wa_messages WHERE company_id=? ${year ? `AND strftime('%Y', received_at)='${year}'` : ''}
+    GROUP BY classified_as
+    ORDER BY count DESC
+  `).all(company_id);
+
+  // 3) 文档按 kind 分布
+  const byDocKind = db.prepare(`
+    SELECT kind, COUNT(*) AS count
+    FROM documents WHERE company_id=? ${year ? `AND strftime('%Y', created_at)='${year}'` : ''}
+    GROUP BY kind
+    ORDER BY count DESC
+  `).all(company_id);
+
+  // 4) 按月份聚合（发票金额 + 交易）
+  const byMonth = db.prepare(`
+    SELECT
+      strftime('%Y-%m', COALESCE(issue_date, created_at)) AS ym,
+      COUNT(*) AS inv_count,
+      COALESCE(SUM(total), 0) AS inv_total,
+      COALESCE(SUM(gst_amount), 0) AS gst_total
+    FROM invoices WHERE company_id=? ${yf}
+    GROUP BY ym ORDER BY ym ASC
+  `).all(company_id);
+
+  const byMonthTxn = db.prepare(`
+    SELECT
+      strftime('%Y-%m', COALESCE(transaction_date, created_at)) AS ym,
+      COUNT(*) AS txn_count,
+      COALESCE(SUM(CASE WHEN amount>0 THEN amount ELSE 0 END), 0) AS revenue,
+      COALESCE(SUM(CASE WHEN amount<0 THEN -amount ELSE 0 END), 0) AS expense
+    FROM transactions WHERE company_id=? ${ytf}
+    GROUP BY ym ORDER BY ym ASC
+  `).all(company_id);
+
+  // 合并同月数据
+  const monthMap = new Map();
+  for (const m of byMonth) monthMap.set(m.ym, { ym: m.ym, inv_count: m.inv_count, inv_total: m.inv_total, gst_total: m.gst_total, txn_count: 0, revenue: 0, expense: 0 });
+  for (const t of byMonthTxn) {
+    const existing = monthMap.get(t.ym) || { ym: t.ym, inv_count: 0, inv_total: 0, gst_total: 0 };
+    existing.txn_count = t.txn_count;
+    existing.revenue = t.revenue;
+    existing.expense = t.expense;
+    monthMap.set(t.ym, existing);
+  }
+  const monthly = Array.from(monthMap.values()).sort((a, b) => a.ym.localeCompare(b.ym));
+
+  // 5) 总计
+  const totals = db.prepare(`
+    SELECT
+      COUNT(*) AS invoice_count,
+      COALESCE(SUM(total), 0) AS invoice_total,
+      COALESCE(SUM(gst_amount), 0) AS gst_total
+    FROM invoices WHERE company_id=? ${yf}
+  `).get(company_id);
+
+  return {
+    year: year || null,
+    years_available: years,
+    totals,
+    by_vendor: byVendor,
+    by_category: byCategory,
+    by_doc_kind: byDocKind,
+    by_month: monthly,
+  };
+}
 
 // ---------- 12. CSV 导出（支持按节选择） ----------
 function csvEscape(v) {

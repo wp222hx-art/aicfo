@@ -6,3 +6,5 @@ data/*.db-journal
 *.log
 .DS_Store
 .env
+data/snapshots/
+data/uploads/

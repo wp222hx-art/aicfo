@@ -1967,6 +1967,7 @@ async function companyArchiveDetail(params) {
       <div class="card" style="padding:0">
         <div style="display:flex;border-bottom:1px solid #e2e8f0;overflow-x:auto" id="arc_tabs">
           <div class="arc-tab active" data-tab="overview" onclick="arcTab('overview')">📊 概览</div>
+          <div class="arc-tab" data-tab="analytics" onclick="arcTab('analytics')">📉 分析</div>
           <div class="arc-tab" data-tab="basic" onclick="arcTab('basic')">🏢 基础信息</div>
           <div class="arc-tab" data-tab="expenses" onclick="arcTab('expenses')">💰 消费记录</div>
           <div class="arc-tab" data-tab="tax" onclick="arcTab('tax')">🏛️ 报税信息</div>
@@ -1974,6 +1975,7 @@ async function companyArchiveDetail(params) {
           <div class="arc-tab" data-tab="history" onclick="arcTab('history')">🕑 历史记录</div>
           <div class="arc-tab" data-tab="timeline" onclick="arcTab('timeline')">⏳ 时间线</div>
           <div class="arc-tab" data-tab="billing" onclick="arcTab('billing')">💳 订阅支付</div>
+          <div class="arc-tab" data-tab="snapshots" onclick="arcTab('snapshots')">📸 快照历史</div>
         </div>
         <div id="arc_tab_body" style="padding:16px"></div>
       </div>
@@ -2009,6 +2011,258 @@ window.arcTab = function (tab) {
   if (tab === 'history')    body.innerHTML = arcRenderHistory(a);
   if (tab === 'timeline')   body.innerHTML = arcRenderTimeline(a);
   if (tab === 'billing')    body.innerHTML = arcRenderBilling(a);
+  if (tab === 'analytics')  { body.innerHTML = '<p class="muted">加载分析数据…</p>'; arcLoadAnalytics(a.company.id); }
+  if (tab === 'snapshots')  { body.innerHTML = '<p class="muted">加载快照列表…</p>'; arcLoadSnapshots(a.company.id); }
+};
+
+// ========== T: 档案分析（供应商/分类/月份/饼图） ==========
+async function arcLoadAnalytics(company_id, year = null) {
+  const body = document.getElementById('arc_tab_body');
+  if (!body) return;
+  const qs = year ? `?year=${encodeURIComponent(year)}` : '';
+  try {
+    const r = await fetch(`/api/admin/archive/company/${company_id}/analytics${qs}`).then(x => x.json());
+    if (!r.ok) { body.innerHTML = `<p style="color:#ef4444">加载失败：${esc(r.error || '')}</p>`; return; }
+    body.innerHTML = arcRenderAnalytics(company_id, r.data, year);
+  } catch (e) {
+    body.innerHTML = `<p style="color:#ef4444">请求失败：${esc(e.message)}</p>`;
+  }
+}
+
+window.arcAnalyticsFilterYear = function (company_id, year) {
+  arcLoadAnalytics(company_id, year || null);
+};
+
+function arcRenderAnalytics(company_id, d, currentYear) {
+  const years = d.years_available || [];
+  const t = d.totals || {};
+  const vendors = d.by_vendor || [];
+  const categories = d.by_category || [];
+  const docKinds = d.by_doc_kind || [];
+  const byMonth = d.by_month || [];
+
+  // 饼图（纯 CSS conic-gradient）—— 按供应商
+  const totalVendorAmt = vendors.reduce((a, v) => a + (v.total_amount || 0), 0) || 1;
+  const palette = ['#2563eb','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899','#84cc16','#f97316','#6366f1'];
+  let cumPct = 0;
+  const vendorSegments = vendors.slice(0, 10).map((v, i) => {
+    const pct = (v.total_amount || 0) / totalVendorAmt * 100;
+    const seg = `${palette[i % palette.length]} ${cumPct.toFixed(2)}% ${(cumPct + pct).toFixed(2)}%`;
+    cumPct += pct;
+    return { seg, color: palette[i % palette.length], pct, vendor: v.vendor, amount: v.total_amount };
+  });
+  const vendorPie = vendorSegments.length ? `conic-gradient(${vendorSegments.map(s => s.seg).join(', ')})` : '#e2e8f0';
+
+  // 饼图 —— 按分类
+  const totalCat = categories.reduce((a, c) => a + (c.count || 0), 0) || 1;
+  let cumPct2 = 0;
+  const catSegments = categories.map((c, i) => {
+    const pct = (c.count || 0) / totalCat * 100;
+    const seg = `${palette[i % palette.length]} ${cumPct2.toFixed(2)}% ${(cumPct2 + pct).toFixed(2)}%`;
+    cumPct2 += pct;
+    return { seg, color: palette[i % palette.length], pct, category: c.category || '(未分类)', count: c.count };
+  });
+  const catPie = catSegments.length ? `conic-gradient(${catSegments.map(s => s.seg).join(', ')})` : '#e2e8f0';
+
+  // 月度柱状图（发票金额 & 交易金额）
+  const maxInv = Math.max(1, ...byMonth.map(m => m.inv_total || 0));
+  const maxTxn = Math.max(1, ...byMonth.map(m => Math.abs(m.revenue || 0) + Math.abs(m.expense || 0)));
+
+  return `
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px">
+      <label style="font-size:13px">年度筛选：</label>
+      <select onchange="arcAnalyticsFilterYear('${esc(company_id)}', this.value)" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px">
+        <option value="">全部年份</option>
+        ${years.map(y => `<option value="${esc(y)}" ${currentYear === y ? 'selected' : ''}>${esc(y)}</option>`).join('')}
+      </select>
+      <span class="muted" style="font-size:12px">共 ${vendors.length} 个供应商 · 发票合计 S$ ${(t.invoice_total || 0).toFixed(2)} · GST S$ ${(t.gst_total || 0).toFixed(2)}</span>
+    </div>
+
+    <div class="grid" style="grid-template-columns:repeat(2,1fr);gap:16px;margin-bottom:20px">
+      <div class="card" style="padding:16px">
+        <h4 style="margin:0 0 12px">🥧 按供应商分布（Top 10，按金额）</h4>
+        <div style="display:flex;gap:16px;align-items:center">
+          <div style="width:180px;height:180px;border-radius:50%;background:${vendorPie};flex-shrink:0;box-shadow:inset 0 0 0 1px rgba(0,0,0,0.05)"></div>
+          <div style="flex:1;max-height:180px;overflow:auto">
+            ${vendorSegments.map(s => `
+              <div style="display:flex;align-items:center;gap:6px;font-size:12px;margin:3px 0">
+                <span style="display:inline-block;width:12px;height:12px;border-radius:2px;background:${s.color}"></span>
+                <span style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(s.vendor)}">${esc(s.vendor)}</span>
+                <b>S$ ${(s.amount || 0).toFixed(2)}</b>
+                <span class="muted">${s.pct.toFixed(1)}%</span>
+              </div>`).join('') || '<p class="muted">暂无数据</p>'}
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="padding:16px">
+        <h4 style="margin:0 0 12px">🥧 按消息分类分布（WA）</h4>
+        <div style="display:flex;gap:16px;align-items:center">
+          <div style="width:180px;height:180px;border-radius:50%;background:${catPie};flex-shrink:0;box-shadow:inset 0 0 0 1px rgba(0,0,0,0.05)"></div>
+          <div style="flex:1">
+            ${catSegments.map(s => `
+              <div style="display:flex;align-items:center;gap:6px;font-size:12px;margin:3px 0">
+                <span style="display:inline-block;width:12px;height:12px;border-radius:2px;background:${s.color}"></span>
+                <span style="flex:1">${esc(s.category)}</span>
+                <b>${s.count}</b>
+                <span class="muted">${s.pct.toFixed(1)}%</span>
+              </div>`).join('') || '<p class="muted">暂无数据</p>'}
+          </div>
+        </div>
+        ${docKinds.length ? `
+        <div style="margin-top:12px;padding-top:10px;border-top:1px dashed #e2e8f0">
+          <div class="muted" style="font-size:11px;margin-bottom:6px">文档类型 (documents.kind)</div>
+          ${docKinds.map(k => `<span style="display:inline-block;background:#f1f5f9;padding:2px 8px;border-radius:10px;font-size:12px;margin:2px">${esc(k.kind)} · ${k.count}</span>`).join('')}
+        </div>` : ''}
+      </div>
+    </div>
+
+    <div class="card" style="padding:16px;margin-bottom:20px">
+      <h4 style="margin:0 0 12px">📊 月度趋势</h4>
+      ${byMonth.length ? `
+      <div style="display:flex;gap:8px;align-items:flex-end;height:160px;padding:10px 0;border-bottom:1px solid #e2e8f0">
+        ${byMonth.map(m => {
+          const invH = (m.inv_total || 0) / maxInv * 120;
+          const expH = Math.abs(m.expense || 0) / maxTxn * 120;
+          const revH = Math.abs(m.revenue || 0) / maxTxn * 120;
+          return `
+          <div style="flex:1;text-align:center;min-width:40px">
+            <div style="display:flex;justify-content:center;gap:2px;align-items:flex-end;height:130px">
+              <div title="发票 S$ ${(m.inv_total||0).toFixed(2)}" style="width:14px;height:${invH}px;background:#2563eb;border-radius:2px 2px 0 0"></div>
+              <div title="营收 S$ ${(m.revenue||0).toFixed(2)}" style="width:14px;height:${revH}px;background:#10b981;border-radius:2px 2px 0 0"></div>
+              <div title="支出 S$ ${(m.expense||0).toFixed(2)}" style="width:14px;height:${expH}px;background:#ef4444;border-radius:2px 2px 0 0"></div>
+            </div>
+            <div style="font-size:10px;margin-top:4px;color:#64748b">${esc(m.ym)}</div>
+          </div>`;
+        }).join('')}
+      </div>
+      <div style="display:flex;gap:16px;margin-top:8px;font-size:12px">
+        <span><span style="display:inline-block;width:10px;height:10px;background:#2563eb;border-radius:2px"></span> 发票金额</span>
+        <span><span style="display:inline-block;width:10px;height:10px;background:#10b981;border-radius:2px"></span> 营收</span>
+        <span><span style="display:inline-block;width:10px;height:10px;background:#ef4444;border-radius:2px"></span> 支出</span>
+      </div>` : '<p class="muted">暂无月度数据</p>'}
+    </div>
+
+    <div class="card" style="padding:16px">
+      <h4 style="margin:0 0 12px">🏪 供应商明细（共 ${vendors.length} 个）</h4>
+      ${vendors.length ? `<table class="arc-tbl">
+        <thead><tr><th>#</th><th>供应商</th><th style="text-align:right">次数</th><th style="text-align:right">合计金额</th><th style="text-align:right">合计 GST</th><th style="text-align:right">均单价</th><th>最近发票</th></tr></thead>
+        <tbody>${vendors.map((v, i) => `
+          <tr>
+            <td>${i + 1}</td>
+            <td><b>${esc(v.vendor)}</b></td>
+            <td style="text-align:right">${v.count}</td>
+            <td style="text-align:right"><b>S$ ${(v.total_amount || 0).toFixed(2)}</b></td>
+            <td style="text-align:right">S$ ${(v.total_gst || 0).toFixed(2)}</td>
+            <td style="text-align:right">S$ ${(v.avg_amount || 0).toFixed(2)}</td>
+            <td>${esc(v.last_invoice_date || '-')}</td>
+          </tr>`).join('')}</tbody>
+      </table>` : '<p class="muted">暂无供应商数据</p>'}
+    </div>
+  `;
+}
+
+// ========== U: 快照历史 + 对比 ==========
+async function arcLoadSnapshots(company_id) {
+  const body = document.getElementById('arc_tab_body');
+  if (!body) return;
+  try {
+    const r = await fetch(`/api/admin/archive/company/${company_id}/snapshots`).then(x => x.json());
+    if (!r.ok) { body.innerHTML = `<p style="color:#ef4444">加载失败：${esc(r.error || '')}</p>`; return; }
+    body.innerHTML = arcRenderSnapshots(company_id, r.data || []);
+  } catch (e) {
+    body.innerHTML = `<p style="color:#ef4444">请求失败：${esc(e.message)}</p>`;
+  }
+}
+
+function arcRenderSnapshots(company_id, snaps) {
+  return `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+      <div>
+        <h4 style="margin:0">📸 快照历史（共 ${snaps.length} 个）</h4>
+        <p class="muted" style="margin:4px 0 0;font-size:12px">每个快照包含 JSON / CSV / HTML 三种格式，可选择两个快照对比关键指标变化</p>
+      </div>
+      <button class="btn" onclick="arcSnapshot('${esc(company_id)}', () => arcLoadSnapshots('${esc(company_id)}'))">📸 生成新快照</button>
+    </div>
+
+    ${snaps.length >= 2 ? `
+    <div class="card" style="padding:12px;margin-bottom:14px;background:#f8fafc">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <b>对比两个快照：</b>
+        <select id="snap_a" style="padding:5px 8px;border:1px solid #e2e8f0;border-radius:5px">
+          ${snaps.map((s, i) => `<option value="${esc(s.snapshot_id)}" ${i === 1 ? 'selected' : ''}>${esc(s.name)} (${esc((s.created_at || '').slice(0,19))})</option>`).join('')}
+        </select>
+        <span>→</span>
+        <select id="snap_b" style="padding:5px 8px;border:1px solid #e2e8f0;border-radius:5px">
+          ${snaps.map((s, i) => `<option value="${esc(s.snapshot_id)}" ${i === 0 ? 'selected' : ''}>${esc(s.name)} (${esc((s.created_at || '').slice(0,19))})</option>`).join('')}
+        </select>
+        <button class="btn" onclick="arcDiffSnapshots('${esc(company_id)}')">🔍 对比</button>
+      </div>
+      <div id="snap_diff_result" style="margin-top:10px"></div>
+    </div>` : ''}
+
+    ${snaps.length ? `<table class="arc-tbl">
+      <thead><tr><th>快照名</th><th>时间</th><th style="text-align:right">交易</th><th style="text-align:right">发票</th><th style="text-align:right">发票额</th><th style="text-align:right">文档</th><th style="text-align:right">大小</th><th>下载</th></tr></thead>
+      <tbody>${snaps.map(s => {
+        const m = s.metrics || {};
+        const sizeKB = ((s.json_bytes || 0) + (s.csv_bytes || 0) + (s.html_bytes || 0)) / 1024;
+        const f = s.files || {};
+        return `
+        <tr>
+          <td><b>${esc(s.name)}</b><br><code style="font-size:10px;color:#64748b">${esc(s.snapshot_id)}</code></td>
+          <td>${esc((s.created_at || '').slice(0, 19).replace('T', ' '))}</td>
+          <td style="text-align:right">${m.transactions || 0}</td>
+          <td style="text-align:right">${m.invoice_count || 0}</td>
+          <td style="text-align:right">S$ ${(m.invoice_total || 0).toFixed(2)}</td>
+          <td style="text-align:right">${m.document_count || 0}</td>
+          <td style="text-align:right">${sizeKB.toFixed(1)} KB</td>
+          <td>
+            ${f.json ? `<a href="${esc(f.json)}" target="_blank" style="margin-right:6px">JSON</a>` : ''}
+            ${f.csv  ? `<a href="${esc(f.csv)}"  target="_blank" style="margin-right:6px">CSV</a>` : ''}
+            ${f.html ? `<a href="${esc(f.html)}" target="_blank">HTML</a>` : ''}
+          </td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>` : `
+    <div class="card" style="padding:24px;text-align:center">
+      <p class="muted">尚未生成任何快照</p>
+      <button class="btn primary" onclick="arcSnapshot('${esc(company_id)}', () => arcLoadSnapshots('${esc(company_id)}'))">📸 立即生成第一个快照</button>
+    </div>`}
+  `;
+}
+
+window.arcDiffSnapshots = async function (company_id) {
+  const a = document.getElementById('snap_a')?.value;
+  const b = document.getElementById('snap_b')?.value;
+  const out = document.getElementById('snap_diff_result');
+  if (!a || !b) return;
+  if (a === b) { out.innerHTML = '<p class="muted">请选择两个不同的快照</p>'; return; }
+  out.innerHTML = '<p class="muted">对比中…</p>';
+  try {
+    const r = await fetch(`/api/admin/archive/company/${company_id}/snapshot/diff?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`).then(x => x.json());
+    if (!r.ok) { out.innerHTML = `<p style="color:#ef4444">对比失败：${esc(r.error || '')}</p>`; return; }
+    out.innerHTML = `
+      <div style="font-size:12px;margin-bottom:8px">
+        <b>A:</b> ${esc(r.a.name)} <span class="muted">(${esc((r.a.created_at||'').slice(0,19))})</span> →
+        <b>B:</b> ${esc(r.b.name)} <span class="muted">(${esc((r.b.created_at||'').slice(0,19))})</span>
+      </div>
+      <table class="arc-tbl">
+        <thead><tr><th>指标</th><th style="text-align:right">A</th><th style="text-align:right">B</th><th style="text-align:right">变化</th></tr></thead>
+        <tbody>${r.diff.map(d => {
+          const color = d.delta > 0 ? '#10b981' : (d.delta < 0 ? '#ef4444' : '#64748b');
+          const sign = d.delta > 0 ? '+' : '';
+          const isMoney = d.metric.includes('total') || d.metric === 'revenue' || d.metric === 'expense';
+          const fmt = v => isMoney ? `S$ ${(v || 0).toFixed(2)}` : String(v || 0);
+          return `<tr>
+            <td><b>${esc(d.metric)}</b></td>
+            <td style="text-align:right">${fmt(d.a)}</td>
+            <td style="text-align:right">${fmt(d.b)}</td>
+            <td style="text-align:right;color:${color};font-weight:600">${sign}${fmt(d.delta)}</td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table>
+    `;
+  } catch (e) { out.innerHTML = `<p style="color:#ef4444">请求失败：${esc(e.message)}</p>`; }
 };
 
 function arcRenderOverview(a) {
@@ -2371,7 +2625,7 @@ function arcRenderBilling(a) {
   `;
 }
 
-window.arcSnapshot = async function (id) {
+window.arcSnapshot = async function (id, onDone) {
   const name = prompt('快照命名：', `档案快照 ${new Date().toISOString().slice(0,10)}`);
   if (!name) return;
   try {
@@ -2380,8 +2634,13 @@ window.arcSnapshot = async function (id) {
       body: JSON.stringify({ name }),
     });
     const d = await r.json();
-    if (d.ok) gwToast(`✓ 快照已生成 · ${(d.size_bytes/1024).toFixed(1)} KB`, 'ok');
-    else      gwToast('失败: ' + (d.error || r.status), 'err');
+    if (d.ok) {
+      const totalKB = ((d.size_bytes || 0) + (d.csv_bytes || 0) + (d.html_bytes || 0)) / 1024;
+      gwToast(`✓ 快照已生成 · JSON+CSV+HTML · ${totalKB.toFixed(1)} KB`, 'ok');
+      if (typeof onDone === 'function') onDone(d);
+    } else {
+      gwToast('失败: ' + (d.error || r.status), 'err');
+    }
   } catch (e) { gwToast('请求失败: ' + e.message, 'err'); }
 };
 
