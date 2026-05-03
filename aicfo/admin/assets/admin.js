@@ -984,7 +984,8 @@ async function waChannels() {
 // ⚡ 模型网关 (Tokenhot.ai 统一 API)
 // ================================================================================
 async function llmGateway() {
-  const app = document.getElementById('app');
+  const app = document.getElementById('av');
+  if (!app) { console.error('[llmGateway] #av container not found'); return; }
   app.innerHTML = `<div class="card"><h3>⚡ 模型网关 (Tokenhot.ai)</h3><p class="muted">加载中…</p></div>`;
 
   let cfg = {};
