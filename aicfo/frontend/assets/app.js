@@ -43,7 +43,7 @@ function nav(route, params = {}) {
   state.route = route;
   state.params = params;
   document.querySelectorAll('.nav a').forEach(a => a.classList.toggle('active', a.dataset.route === route));
-  const routes = { dashboard: viewDashboard, register: viewRegister, books: viewBooks, reports: viewReports, monthly: viewMonthly, tax: viewTax, secretary: viewSecretary, chat: viewChat, pricing: viewPricing, order: viewOrder, signup: viewSignup, plans: viewPlans, wa: viewWaChannel };
+  const routes = { dashboard: viewDashboard, register: viewRegister, books: viewBooks, reports: viewReports, monthly: viewMonthly, tax: viewTax, secretary: viewSecretary, chat: viewChat, pricing: viewPricing, order: viewOrder, signup: viewSignup, plans: viewPlans, wa: viewWaChannel, myArchive: viewMyArchive, myArchiveDetail: viewMyArchiveDetail };
   const fn = routes[route] || viewDashboard;
   fn(params);
   window.scrollTo(0, 0);
@@ -1657,3 +1657,141 @@ window.sendWaMsg = async (token, wa_phone) => {
     setTimeout(() => viewWaChannel(), 1500);
   } catch (e) { box.innerHTML = `<div class="badge badge-danger">${esc(e.message)}</div>`; }
 };
+
+// ================================================================================
+// MY COMPANY ARCHIVE (客户端：我的企业档案库)
+// ================================================================================
+async function viewMyArchive() {
+  $('#view').innerHTML = `<div class="hero"><h1>📚 我的企业档案库</h1><p>每家已创建的企业都有独立档案库，记录上传的文件、消费、报税、财报、历史留痕。</p></div>
+    <div id="myArcList"><p>加载中...</p></div>`;
+  const uid = state.user?.id || 'usr_demo_001';
+  try {
+    // 拉我的所有公司 + 每家公司用 admin/archive 接口取 summary
+    const all = await fetch('/api/admin/archive/companies?limit=500').then(r => r.json());
+    const mine = (all.companies || []).filter(c => !state.user || true); // 管理员视图下全部可见；普通用户只看到自己的
+    // 如果有 user 上下文，尝试过滤 created_by=uid；admin/archive/companies 返回里没带 created_by，可以用 /companies
+    let myCompanies = [];
+    try {
+      const cs = await api('/companies');
+      myCompanies = cs.filter(c => c.created_by === uid).map(c => c.id);
+    } catch (_) {}
+    const filtered = myCompanies.length ? mine.filter(c => myCompanies.includes(c.id)) : mine;
+
+    $('#myArcList').innerHTML = `
+      <div class="grid grid-2 mb-20">
+        <div class="card stat-card"><div class="stat-label">我的企业</div><div class="stat-value">${filtered.length}</div></div>
+        <div class="card stat-card"><div class="stat-label">合计发票额</div><div class="stat-value">S$ ${filtered.reduce((s,c)=>s+(c.stats?.invoice_total||0),0).toFixed(2)}</div></div>
+      </div>
+      <div class="card">
+        ${filtered.length ? `<table class="table">
+          <thead><tr><th>公司</th><th>UEN</th><th>状态</th><th>交易</th><th>发票</th><th>文档</th><th>上传</th><th>最近活动</th><th></th></tr></thead>
+          <tbody>${filtered.map(c => `<tr>
+            <td><b>${esc(c.name)}</b><div class="small muted">${esc(c.segment || '')} · ${esc(c.subscription_tier || '')}</div></td>
+            <td class="mono small">${esc(c.uen || '-')}</td>
+            <td><span class="badge">${esc(c.status)}</span></td>
+            <td>${c.stats.transactions}</td>
+            <td>${c.stats.invoices} · S$${(c.stats.invoice_total||0).toFixed(2)}</td>
+            <td>${c.stats.documents}</td>
+            <td>${c.stats.upload_submissions}</td>
+            <td class="small">${esc((c.last_activity_at || '').slice(0,16))}</td>
+            <td><button class="btn btn-sm btn-primary" onclick="nav('myArchiveDetail',{id:'${esc(c.id)}'})">📂 打开</button></td>
+          </tr>`).join('')}</tbody>
+        </table>` : `<p class="muted">还没有企业档案。先在"Register"或"注册"里创建企业，档案会自动生成。</p>`}
+      </div>`;
+  } catch (e) {
+    $('#myArcList').innerHTML = `<div class="card"><p style="color:#ef4444">加载失败：${esc(e.message)}</p></div>`;
+  }
+}
+
+async function viewMyArchiveDetail({ id } = {}) {
+  if (!id) { nav('myArchive'); return; }
+  $('#view').innerHTML = `<div class="hero"><h1>📂 企业档案详情</h1><p>加载中...</p></div>`;
+  try {
+    const res = await fetch('/api/admin/archive/company/' + id).then(r => r.json());
+    if (!res.ok) { $('#view').innerHTML = `<div class="card"><p style="color:#ef4444">${esc(res.error || '未找到')}</p><button class="btn" onclick="nav('myArchive')">← 返回</button></div>`; return; }
+    const a = res.archive;
+    const c = a.company;
+    $('#view').innerHTML = `
+      <div class="hero">
+        <a onclick="nav('myArchive')" style="color:rgba(255,255,255,0.9);cursor:pointer">← 返回列表</a>
+        <h1>🏢 ${esc(c.name)}</h1>
+        <p>UEN: <code>${esc(c.uen || '-')}</code> · 状态: <b>${esc(c.status)}</b> · 订阅: ${esc(c.subscription_tier || 'basic')} · 细分: ${esc(c.segment || '')}</p>
+      </div>
+
+      <div class="grid grid-4 mb-20">
+        <div class="card stat-card"><div class="stat-label">交易流水</div><div class="stat-value">${a.expenses.transactions.length}</div><div class="stat-delta">净现金流 S$ ${(a.expenses.summary.net_cashflow||0).toFixed(2)}</div></div>
+        <div class="card stat-card"><div class="stat-label">发票</div><div class="stat-value">${a.expenses.invoices.length}</div><div class="stat-delta">S$ ${(a.expenses.summary.total_invoice_amount||0).toFixed(2)}</div></div>
+        <div class="card stat-card"><div class="stat-label">文档</div><div class="stat-value">${a.history.documents.length}</div><div class="stat-delta">税务 ${a.tax.filings.length} 条</div></div>
+        <div class="card stat-card"><div class="stat-label">上传次数</div><div class="stat-value">${a.history.uploads.length}</div><div class="stat-delta">WA ${a.history.wa_messages.length} · Agent ${a.history.agent_runs.length}</div></div>
+      </div>
+
+      <div class="card mb-20">
+        <h2>🧾 最近发票（含上传原件）</h2>
+        ${a.expenses.invoices.length ? `<table class="table">
+          <thead><tr><th style="width:80px">原件</th><th>发票号</th><th>供应商</th><th>日期</th><th>金额</th><th>GST</th><th>状态</th></tr></thead>
+          <tbody>${a.expenses.invoices.slice(0,20).map(i => `<tr>
+            <td>${renderClientFile(i.image_url)}</td>
+            <td class="mono small">${esc(i.invoice_number || i.id.slice(-8))}</td>
+            <td>${esc(i.vendor_name || '-')}</td>
+            <td class="small">${esc(i.issue_date || '-')}</td>
+            <td><b>${esc(i.currency || 'SGD')} ${(i.total||0).toFixed(2)}</b></td>
+            <td>${(i.gst_amount||0).toFixed(2)}</td>
+            <td><span class="badge">${esc(i.status)}</span></td>
+          </tr>`).join('')}</tbody>
+        </table>` : `<p class="muted">还没有发票。扫描企业专属上传链接的二维码上传一张试试。</p>`}
+      </div>
+
+      <div class="card mb-20">
+        <h2>📤 最近上传（点图片预览）</h2>
+        ${a.history.wa_messages.length ? `<table class="table">
+          <thead><tr><th style="width:80px">预览</th><th>类型</th><th>内容</th><th>AI 分类</th><th>置信度</th><th>时间</th></tr></thead>
+          <tbody>${a.history.wa_messages.slice(0,20).map(m => `<tr>
+            <td>${renderClientFile(m.media_url, m.msg_type === 'image' ? 'image/*' : '')}</td>
+            <td>${esc(m.msg_type || 'text')}</td>
+            <td class="small" style="max-width:240px;overflow:hidden;text-overflow:ellipsis">${esc((m.content || '').slice(0,80))}</td>
+            <td>${esc(m.classified_as || '-')}</td>
+            <td>${m.ai_confidence != null ? (m.ai_confidence*100).toFixed(0)+'%' : '-'}</td>
+            <td class="small">${esc((m.received_at || '').slice(0,16))}</td>
+          </tr>`).join('')}</tbody>
+        </table>` : `<p class="muted">还没有上传记录。</p>`}
+      </div>
+
+      <div class="card mb-20">
+        <h2>⏰ 统一时间线</h2>
+        ${a.timeline && a.timeline.length ? `<div style="max-height:400px;overflow-y:auto">
+          ${a.timeline.slice(0,50).map(e => `<div style="display:flex;gap:12px;padding:10px 0;border-bottom:1px solid #f1f5f9">
+            <div style="font-size:22px;width:30px">${e.icon || '•'}</div>
+            <div style="flex:1">
+              <div><b>${esc(e.title || '')}</b></div>
+              <div class="small muted">${esc(e.detail || '')} · ${esc((e.ts || '').slice(0,16))}</div>
+            </div>
+          </div>`).join('')}
+        </div>` : `<p class="muted">暂无历史事件。</p>`}
+      </div>
+
+      <div style="display:flex;gap:10px">
+        <a class="btn btn-primary" href="/api/admin/archive/company/${esc(c.id)}" target="_blank">⬇️ 导出完整 JSON</a>
+        <button class="btn" onclick="nav('myArchive')">← 返回列表</button>
+      </div>
+    `;
+  } catch (e) {
+    $('#view').innerHTML = `<div class="card"><p style="color:#ef4444">${esc(e.message)}</p></div>`;
+  }
+}
+
+// 客户端文件预览工具（与 admin 端 arcRenderFile 对齐）
+function renderClientFile(url, mime) {
+  if (!url) return '<span class="muted">-</span>';
+  const u = String(url);
+  const isImg = /\.(png|jpg|jpeg|gif|webp|bmp)$/i.test(u) || /^image\//.test(mime || '');
+  const isPdf = /\.pdf$/i.test(u) || (mime || '').includes('pdf');
+  const abs = u.startsWith('/') ? u : (u.startsWith('http') ? u : '');
+  if (!abs) return `<code class="small">${esc(u.slice(0, 30))}</code>`;
+  if (isImg) {
+    return `<a href="${abs}" target="_blank" title="点击查看原图">
+      <img src="${abs}" style="width:56px;height:56px;object-fit:cover;border:1px solid #e5e7eb;border-radius:6px">
+    </a>`;
+  }
+  const icon = isPdf ? '📄' : '📎';
+  return `<a href="${abs}" target="_blank">${icon} ${esc(u.split('/').pop().slice(0,20))}</a>`;
+}
