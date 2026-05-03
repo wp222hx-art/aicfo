@@ -14,6 +14,7 @@ const fileIngest = require('../services/file-ingest');
 const waBot = require('../services/wa-bot');
 const subs  = require('../services/subscription');
 const llmGateway = require('../services/llm-gateway');
+const sgRegistry = require('../services/sg-registry');
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
@@ -56,20 +57,39 @@ router.get('/companies/:id', (req, res) => {
 router.post('/registration/name-check', async (req, res) => {
   const { proposed_name, suffix = 'Pte Ltd' } = req.body || {};
   const full = `${proposed_name} ${suffix}`;
-  const result = await Promise.resolve(llm.complete({ schema: 'name_compliance', context: { name: full, suffix }, messages: [{ role: 'user', content: full }] }));
-  // Normalize between sim + real LLM field names
-  const verdict = result.verdict || result.compliance_verdict || 'pass';
-  const alternatives = result.alternatives || result.alternative_suggestions || [];
+
+  // 1) ACRA / BizFile 官方可用性检查（mock/sandbox/live 由后台配置切换）
+  let registryResult = null;
+  try {
+    registryResult = await sgRegistry.checkCompanyName(full);
+  } catch (e) {
+    registryResult = { ok: false, source: 'error', available: null, reason: e.message };
+  }
+
+  // 2) LLM 合规判断（关键字/敏感词/Companies Act Section 27）
+  const llmResult = await Promise.resolve(llm.complete({
+    schema: 'name_compliance',
+    context: { name: full, suffix, registry_hint: registryResult },
+    messages: [{ role: 'user', content: full }]
+  }));
+  const verdict = llmResult.verdict || llmResult.compliance_verdict || 'pass';
+  const alternatives = llmResult.alternatives || llmResult.alternative_suggestions || [];
+
+  // 3) 只有 ACRA 可用 + LLM 合规 pass 两者都通过才算 available
+  const acraAvailable = registryResult?.available !== false;
+  const finalAvailable = acraAvailable && verdict === 'pass';
+
   res.json({
     proposed_name: full,
-    available: verdict === 'pass',
+    available: finalAvailable,
     verdict,
-    confidence: result.confidence,
-    reasoning: result.reasoning,
-    reasoning_cn: result.reasoning_cn,
-    alternatives,
-    regulatory_refs: result.regulatory_refs || ['Companies Act Section 27'],
-    _model: result._model || 'sim',
+    confidence: llmResult.confidence,
+    reasoning: llmResult.reasoning,
+    reasoning_cn: llmResult.reasoning_cn,
+    alternatives: alternatives.length ? alternatives : (registryResult?.suggestions || []),
+    regulatory_refs: llmResult.regulatory_refs || ['Companies Act Section 27'],
+    registry: registryResult,          // 真/模拟 ACRA 响应
+    _model: llmResult._model || 'sim',
     checked_at: new Date().toISOString()
   });
 });
@@ -1173,6 +1193,90 @@ router.post('/admin/llm/test', async (req, res) => {
 router.get('/admin/llm/logs', (req, res) => {
   const limit = +req.query.limit || 30;
   res.json({ ok: true, stats: llmGateway.stats(), logs: llmGateway.recentLogs(limit) });
+});
+
+// ================================================================================
+// Singapore Registry (ACRA/BizFile/MyInfo/IRAS) 管理 API
+// ================================================================================
+router.get('/admin/registry/config', (req, res) => {
+  res.json({ ok: true, config: sgRegistry.getConfig() });
+});
+
+router.post('/admin/registry/config', (req, res) => {
+  try {
+    const patch = req.body || {};
+    const allow = ['mode','bizfile_base_url','bizfile_api_key',
+                   'myinfo_base_url','myinfo_client_id','myinfo_client_secret',
+                   'iras_base_url','iras_api_key','timeout_ms','retry'];
+    const cleaned = {};
+    for (const k of allow) if (k in patch) cleaned[k] = patch[k];
+    const cfg = sgRegistry.updateConfig(cleaned);
+    res.json({ ok: true, config: cfg });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.post('/admin/registry/ping', async (req, res) => {
+  try {
+    const r = await sgRegistry.ping();
+    res.json(r);
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// 聊天/阅读中被 agent 调用的 UEN 核验工具
+router.post('/registry/uen/verify', async (req, res) => {
+  try {
+    const { uen } = req.body || {};
+    if (!uen) return res.status(400).json({ ok: false, error: '缺少 uen' });
+    const r = await sgRegistry.verifyUEN(uen);
+    res.json(r);
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.post('/registry/ssic/lookup', async (req, res) => {
+  try {
+    const { keyword } = req.body || {};
+    if (!keyword) return res.status(400).json({ ok: false, error: '缺少 keyword' });
+    const r = await sgRegistry.lookupSsicCode(keyword);
+    res.json(r);
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// 正式提交注册到 ACRA（支付完成/KYC完成后触发）
+router.post('/registration/orders/:id/submit-to-acra', async (req, res) => {
+  try {
+    const order = db.prepare(`SELECT * FROM registration_orders WHERE id=?`).get(req.params.id);
+    if (!order) return res.status(404).json({ ok: false, error: 'order not found' });
+    const company = db.prepare(`SELECT * FROM companies WHERE id=?`).get(order.company_id);
+    const persons = db.prepare(`SELECT * FROM persons WHERE company_id=?`).all(order.company_id);
+
+    const payload = {
+      company_name: company.name,
+      paid_up_capital: company.paid_up_capital,
+      currency: company.currency,
+      fye: company.fye,
+      ssic_codes: (company.ssic_codes || '').split(',').filter(Boolean),
+      shareholders: persons
+    };
+    const acra = await sgRegistry.submitIncorporation(payload);
+    if (acra.ok && acra.uen) {
+      db.prepare(`UPDATE companies SET uen=?, status='active' WHERE id=?`).run(acra.uen, company.id);
+      const timeline = JSON.parse(order.timeline || '[]');
+      timeline.forEach(t => { if (t.stage === 'bizfile' || t.stage === 'uen_issued') { t.status = 'done'; t.at = new Date().toISOString(); }});
+      db.prepare(`UPDATE registration_orders SET stage='uen_issued', progress=0.875, timeline=? WHERE id=?`)
+        .run(JSON.stringify(timeline), order.id);
+    }
+    res.json({ ok: true, submission: acra });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
 });
 
 module.exports = router;
