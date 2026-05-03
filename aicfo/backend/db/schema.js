@@ -407,6 +407,71 @@ function init() {
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
   );
 
+  -- ========= Upload Portal (公共上传链接) =========
+  CREATE TABLE IF NOT EXISTS upload_tokens (
+    token TEXT PRIMARY KEY,               -- UP-XXXXXXXX
+    user_id TEXT NOT NULL,
+    company_id TEXT,
+    label TEXT,                           -- 给链接起的名字，如"2025 Q1 报销"
+    allowed_kinds TEXT DEFAULT 'invoice,receipt,bank_txn,report', -- 逗号分隔
+    max_uploads INTEGER DEFAULT 0,        -- 0 = 不限
+    uploads_count INTEGER DEFAULT 0,
+    expires_at TEXT,                      -- ISO，NULL = 永不过期
+    status TEXT DEFAULT 'active',         -- active | revoked
+    created_by TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    last_used_at TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS upload_submissions (
+    id TEXT PRIMARY KEY,
+    token TEXT NOT NULL,
+    user_id TEXT,
+    company_id TEXT,
+    submitter_name TEXT,                  -- 上传人（自填）
+    submitter_phone TEXT,
+    file_count INTEGER DEFAULT 0,
+    note TEXT,
+    classified_as TEXT,                   -- 汇总分类
+    linked_entity_ids TEXT,               -- JSON array
+    ip TEXT,
+    user_agent TEXT,
+    status TEXT DEFAULT 'processed',
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- ========= Telegram Bot (channels 复用 wa_channels 风格) =========
+  CREATE TABLE IF NOT EXISTS telegram_channels (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    company_id TEXT,
+    finance_token TEXT,                   -- FIN-xxx 同 wa_channels
+    tg_chat_id TEXT,                      -- 首次消息绑定
+    tg_username TEXT,
+    status TEXT DEFAULT 'active',
+    message_count INTEGER DEFAULT 0,
+    last_message_at TEXT,
+    linked_at TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS telegram_messages (
+    id TEXT PRIMARY KEY,
+    channel_id TEXT,
+    tg_chat_id TEXT,
+    tg_message_id INTEGER,
+    direction TEXT DEFAULT 'in',          -- in | out
+    msg_type TEXT,                        -- text | photo | document
+    content TEXT,
+    file_id TEXT,
+    classified_as TEXT,
+    linked_entity_type TEXT,
+    linked_entity_id TEXT,
+    ai_confidence REAL,
+    ai_summary TEXT,
+    received_at TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+
   -- ========= Unified Finance Archive (用户财务档案) =========
   CREATE TABLE IF NOT EXISTS user_finance_archive (
     id TEXT PRIMARY KEY,

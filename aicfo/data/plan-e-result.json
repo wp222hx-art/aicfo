@@ -1,0 +1,92 @@
+{
+  "ts": "2026-05-03T09:36:07.681Z",
+  "results": [
+    {
+      "agent": "registration",
+      "ok": true,
+      "dt": 12334,
+      "intent": "registration_agent",
+      "conf": 0.9,
+      "reply": "Registration Agent: assessed company name, recommended SSIC codes, ready for KYC"
+    },
+    {
+      "agent": "kyc",
+      "ok": true,
+      "dt": 4014,
+      "intent": "kyc_agent",
+      "conf": 0.88,
+      "reply": "KYC Agent: AML screen clear. Ready to initiate Singpass (SG resident) or passpor"
+    },
+    {
+      "agent": "bookkeeping",
+      "ok": true,
+      "dt": 4345,
+      "intent": "bookkeeping_agent",
+      "conf": 0.9,
+      "reply": "Bookkeeping Agent: generated journal entries for 0 uncategorised transactions (S"
+    },
+    {
+      "agent": "tax",
+      "ok": true,
+      "dt": 16705,
+      "intent": "tax_agent",
+      "conf": 0.92,
+      "reply": "Tax Agent: computed ECI using SUTR. Revenue S$0, expenses S$-0."
+    },
+    {
+      "agent": "secretary",
+      "ok": true,
+      "dt": 15395,
+      "intent": "secretary_agent",
+      "conf": 0.88,
+      "reply": "Company Secretary Agent: drafted board resolution; AGM + AR deadlines surfaced."
+    },
+    {
+      "agent": "pricing",
+      "ok": true,
+      "dt": 5559,
+      "intent": "pricing_agent",
+      "conf": 0.75,
+      "reply": "Master Agent: I can help with registration, bookkeeping, tax, secretarial, KYC, "
+    },
+    {
+      "agent": "legal",
+      "ok": true,
+      "dt": 4411,
+      "intent": "legal_agent",
+      "conf": 0.82,
+      "reply": "Legal Agent: drafted service agreement skeleton. Qualified lawyer review require"
+    },
+    {
+      "agent": "audit",
+      "ok": true,
+      "dt": 5633,
+      "intent": "audit_agent",
+      "conf": 0.85,
+      "reply": "Audit Agent: working papers for SFRS 115/116/109 prepared. Flag any material ite"
+    },
+    {
+      "agent": "due_diligence",
+      "ok": true,
+      "dt": 5164,
+      "intent": "dd_agent",
+      "conf": 0.85,
+      "reply": "DD Agent: data room index + UBO map + red-flag scan generated. Export as zip fro"
+    },
+    {
+      "agent": "master",
+      "ok": true,
+      "dt": 4513,
+      "intent": "registration_agent",
+      "conf": 0.9,
+      "reply": "Registration Agent: assessed company name, recommended SSIC codes, ready for KYC"
+    }
+  ],
+  "summary": {
+    "ok": 10,
+    "avg": 7807,
+    "hi": 8,
+    "mid": 2,
+    "lo": 0
+  }
+}

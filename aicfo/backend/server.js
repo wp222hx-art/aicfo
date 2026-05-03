@@ -30,8 +30,16 @@ app.use('/api', api);
 app.use('/', express.static(path.join(__dirname, '..', 'frontend')));
 app.use('/admin', express.static(path.join(__dirname, '..', 'admin')));
 
-// SPA fallback for customer app (non-api, non-admin)
-app.get(/^\/(?!api|admin).*/, (req, res, next) => {
+// Upload Portal public page: /upload/UP-XXXXXXXX  → 渲染上传页（token 前端 JS 读取）
+app.get('/upload/:token', (req, res, next) => {
+  const file = path.join(__dirname, '..', 'frontend', 'upload-portal.html');
+  if (fs.existsSync(file)) return res.sendFile(file);
+  next();
+});
+app.use('/upload', express.static(path.join(__dirname, '..', 'frontend')));
+
+// SPA fallback for customer app (non-api, non-admin, non-upload)
+app.get(/^\/(?!api|admin|upload).*/, (req, res, next) => {
   const file = path.join(__dirname, '..', 'frontend', 'index.html');
   if (fs.existsSync(file)) return res.sendFile(file);
   next();

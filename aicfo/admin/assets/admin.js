@@ -25,7 +25,7 @@ function anav(route, params = {}) {
   astate.route = route;
   astate.params = params;
   document.querySelectorAll('.sidebar a').forEach(a => a.classList.toggle('active', a.dataset.route === route));
-  const routes = { overview, queue, agents, runs, playground, rag, training, retrieval, companies, users, archives, waChannels, llmGateway, waConfig };
+  const routes = { overview, queue, agents, runs, playground, rag, training, retrieval, companies, users, archives, waChannels, llmGateway, waConfig, uploadPortal, tgConfig };
   (routes[route] || overview)(params);
   window.scrollTo(0, 0);
 }
@@ -1420,3 +1420,379 @@ async function sendWaMessage(to, text) {
     box.innerHTML = `<div style="color:#ef4444">请求失败：${esc(e.message)}</div>`;
   }
 }
+
+// ============================================================================
+// Upload Portal — 上传链接管理（方案 A）
+// ============================================================================
+async function uploadPortal() {
+  const app = document.getElementById('av');
+  if (!app) return;
+  app.innerHTML = `<div class="card"><h3>🔗 上传链接管理</h3><p class="muted">加载中…</p></div>`;
+
+  try {
+    const res = await api('/admin/upload-portal/tokens?limit=200');
+    const tokens = res.tokens || [];
+    const activeCount = tokens.filter(t => t.status === 'active').length;
+    const totalSubs = tokens.reduce((s, t) => s + (t.submission_count || 0), 0);
+
+    app.innerHTML = `
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <h3 style="margin:0">🔗 上传链接管理 (Upload Portal)</h3>
+          <button class="btn btn-primary" onclick="upCreateDialog()">+ 生成新链接</button>
+        </div>
+        <p class="muted" style="margin:0">给客户/员工发专属上传 URL，点开 → 拍照/拖拽 → AI 自动识别记账，无需账号。</p>
+      </div>
+
+      <div class="grid" style="grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px">
+        <div class="card" style="padding:14px"><div class="muted" style="font-size:12px">链接总数</div><div style="font-size:24px;font-weight:700">${tokens.length}</div></div>
+        <div class="card" style="padding:14px"><div class="muted" style="font-size:12px">活跃</div><div style="font-size:24px;font-weight:700;color:#10b981">${activeCount}</div></div>
+        <div class="card" style="padding:14px"><div class="muted" style="font-size:12px">已撤销</div><div style="font-size:24px;font-weight:700;color:#ef4444">${tokens.length - activeCount}</div></div>
+        <div class="card" style="padding:14px"><div class="muted" style="font-size:12px">累计提交</div><div style="font-size:24px;font-weight:700;color:#2563eb">${totalSubs}</div></div>
+      </div>
+
+      <div class="card">
+        <h3>全部链接</h3>
+        <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead><tr style="background:#f8fafc;text-align:left">
+            <th style="padding:8px">Token</th><th style="padding:8px">名称</th><th style="padding:8px">归属</th>
+            <th style="padding:8px">状态</th><th style="padding:8px">使用</th><th style="padding:8px">提交</th>
+            <th style="padding:8px">到期</th><th style="padding:8px">创建</th><th style="padding:8px">操作</th>
+          </tr></thead>
+          <tbody>
+            ${tokens.map(t => `
+              <tr style="border-bottom:1px solid #f1f5f9">
+                <td style="padding:8px"><code style="background:#eef2f7;padding:2px 6px;border-radius:4px">${esc(t.token)}</code></td>
+                <td style="padding:8px">${esc(t.label || '-')}</td>
+                <td style="padding:8px;font-size:12px">${esc(t.company_name || t.user_name || t.email || '-')}</td>
+                <td style="padding:8px">${t.status === 'active'
+                  ? '<span style="color:#10b981">● active</span>'
+                  : '<span style="color:#ef4444">● revoked</span>'}</td>
+                <td style="padding:8px">${t.uploads_count || 0}${t.max_uploads > 0 ? ' / ' + t.max_uploads : ''}</td>
+                <td style="padding:8px">${t.submission_count || 0}</td>
+                <td style="padding:8px;font-size:12px">${t.expires_at ? esc(t.expires_at.slice(0,10)) : '永久'}</td>
+                <td style="padding:8px;font-size:12px">${esc((t.created_at || '').slice(0,10))}</td>
+                <td style="padding:8px">
+                  <button class="btn btn-sm" onclick="upCopyUrl('${esc(t.token)}')">📋 复制</button>
+                  <button class="btn btn-sm" onclick="upShowQr('${esc(t.token)}','${esc(t.label || '')}')">🔲 二维码</button>
+                  ${t.status === 'active' ? `<button class="btn btn-sm" style="color:#ef4444" onclick="upRevoke('${esc(t.token)}')">✗ 撤销</button>` : ''}
+                </td>
+              </tr>
+            `).join('') || '<tr><td colspan="9" style="padding:20px;text-align:center;color:#94a3b8">还没有上传链接，点右上角「生成新链接」开始。</td></tr>'}
+          </tbody>
+        </table></div>
+      </div>
+
+      <!-- 创建对话框容器 -->
+      <div id="upModal"></div>
+    `;
+  } catch (e) {
+    app.innerHTML = `<div class="card"><h3>🔗 上传链接管理</h3><p style="color:#ef4444">加载失败：${esc(e.message)}</p></div>`;
+  }
+}
+
+window.upCreateDialog = function () {
+  const m = document.getElementById('upModal');
+  m.innerHTML = `
+    <div style="position:fixed;inset:0;background:rgba(15,23,42,0.5);display:flex;align-items:center;justify-content:center;z-index:9999" onclick="if(event.target===this)this.remove()">
+      <div class="card" style="width:460px;max-width:90vw">
+        <h3 style="margin-top:0">+ 生成新上传链接</h3>
+        <label class="lbl">归属用户 ID</label>
+        <input id="up_user_id" value="usr_demo_001" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:8px;margin-top:4px">
+        <label class="lbl">公司 ID（可选）</label>
+        <input id="up_company_id" placeholder="留空使用用户默认公司" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:8px;margin-top:4px">
+        <label class="lbl">链接名称</label>
+        <input id="up_label" value="账单直传" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:8px;margin-top:4px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+          <div><label class="lbl">有效天数 (0=永久)</label><input id="up_exp" value="30" type="number" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:8px"></div>
+          <div><label class="lbl">最多次数 (0=不限)</label><input id="up_max" value="0" type="number" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:8px"></div>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+          <button class="btn" onclick="this.parentElement.parentElement.parentElement.parentElement.remove()">取消</button>
+          <button class="btn btn-primary" onclick="upDoCreate()">生成链接</button>
+        </div>
+      </div>
+    </div>`;
+};
+
+window.upDoCreate = async function () {
+  const user_id    = document.getElementById('up_user_id').value.trim();
+  const company_id = document.getElementById('up_company_id').value.trim() || null;
+  const label      = document.getElementById('up_label').value.trim();
+  const expires_days = +document.getElementById('up_exp').value || 0;
+  const max_uploads  = +document.getElementById('up_max').value || 0;
+  if (!user_id) return alert('user_id 必填');
+  try {
+    const r = await fetch('/api/upload-portal/tokens', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Public-Base': location.origin },
+      body: JSON.stringify({ user_id, company_id, label, expires_days, max_uploads }),
+    });
+    const d = await r.json();
+    if (!d.ok) { gwToast('生成失败: ' + (d.error || r.status), 'err'); return; }
+    document.getElementById('upModal').innerHTML = `
+      <div style="position:fixed;inset:0;background:rgba(15,23,42,0.5);display:flex;align-items:center;justify-content:center;z-index:9999" onclick="if(event.target===this)this.remove()">
+        <div class="card" style="width:480px;max-width:90vw;text-align:center">
+          <h3 style="margin-top:0;color:#10b981">✓ 链接已生成</h3>
+          <div style="background:#f0fdf4;padding:12px;border-radius:8px;word-break:break-all;font-family:monospace;font-size:13px;margin-bottom:12px">${esc(d.url)}</div>
+          <img src="${d.qr_data_url}" style="width:220px;height:220px;border:1px solid #e2e8f0;border-radius:8px" alt="QR">
+          <div class="muted" style="font-size:12px;margin-top:8px">手机扫码即可打开</div>
+          <div style="display:flex;gap:8px;justify-content:center;margin-top:14px">
+            <button class="btn btn-primary" onclick="navigator.clipboard.writeText('${esc(d.url)}').then(()=>gwToast('已复制 URL','ok'))">📋 复制链接</button>
+            <button class="btn" onclick="document.getElementById('upModal').innerHTML='';anav('uploadPortal')">关闭</button>
+          </div>
+        </div>
+      </div>`;
+    gwToast('✓ 链接生成成功', 'ok');
+  } catch (e) { gwToast('请求失败: ' + e.message, 'err'); }
+};
+
+window.upCopyUrl = function (token) {
+  const url = location.origin + '/upload/' + token;
+  navigator.clipboard.writeText(url).then(() => gwToast('已复制: ' + url, 'ok'));
+};
+
+window.upShowQr = async function (token, label) {
+  // 用 API 临时重新生成一次 QR（其实 token 一样，URL 也一样）—— 也可 client 端 QR 库，这里复用 server
+  const url = location.origin + '/upload/' + token;
+  // 用 quickchart 当 fallback
+  const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(url)}`;
+  const m = document.getElementById('upModal');
+  m.innerHTML = `
+    <div style="position:fixed;inset:0;background:rgba(15,23,42,0.5);display:flex;align-items:center;justify-content:center;z-index:9999" onclick="if(event.target===this)this.remove()">
+      <div class="card" style="width:380px;text-align:center">
+        <h3 style="margin-top:0">${esc(label || token)}</h3>
+        <img src="${qrSrc}" style="width:260px;height:260px" alt="QR">
+        <div style="background:#eef2f7;padding:10px;border-radius:6px;font-family:monospace;font-size:12px;margin-top:10px;word-break:break-all">${esc(url)}</div>
+        <div style="display:flex;gap:8px;justify-content:center;margin-top:12px">
+          <button class="btn btn-primary" onclick="navigator.clipboard.writeText('${esc(url)}').then(()=>gwToast('已复制','ok'))">📋 复制 URL</button>
+          <button class="btn" onclick="document.getElementById('upModal').innerHTML=''">关闭</button>
+        </div>
+      </div>
+    </div>`;
+};
+
+window.upRevoke = async function (token) {
+  if (!confirm('确认撤销 ' + token + ' ？此后该链接将无法使用。')) return;
+  try {
+    const r = await fetch(`/api/upload-portal/tokens/${token}/revoke`, { method: 'POST' });
+    const d = await r.json();
+    if (d.ok) { gwToast('✓ 已撤销', 'ok'); anav('uploadPortal'); }
+    else       gwToast('撤销失败: ' + (d.error || r.status), 'err');
+  } catch (e) { gwToast('请求失败: ' + e.message, 'err'); }
+};
+
+// ============================================================================
+// Telegram Bot — 方案 C
+// ============================================================================
+async function tgConfig() {
+  const app = document.getElementById('av');
+  if (!app) return;
+  app.innerHTML = `<div class="card"><h3>✈️ Telegram Bot</h3><p class="muted">加载中…</p></div>`;
+
+  try {
+    const [cfgRes, chRes] = await Promise.all([
+      fetch('/api/admin/telegram/config').then(r => r.json()),
+      fetch('/api/admin/telegram/channels').then(r => r.json()),
+    ]);
+    const cfg = cfgRes.config || {};
+    const channels = chRes.channels || [];
+    const webhookUrl = location.origin + '/api/telegram/webhook';
+
+    app.innerHTML = `
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <h3 style="margin:0">✈️ Telegram Bot (方案 C)</h3>
+          <span style="padding:4px 10px;border-radius:20px;background:${cfg.enabled ? '#dcfce7' : '#fee2e2'};color:${cfg.enabled ? '#166534' : '#991b1b'};font-size:12px">
+            ${cfg.enabled ? '● 已启用' : '● 未启用'}
+          </span>
+        </div>
+        <p class="muted" style="margin:8px 0 0">通过 BotFather 注册 Bot，用户在 Telegram 里搜 Bot 发消息/照片/PDF，AI 自动记账。国际/华人市场首选。</p>
+      </div>
+
+      <div class="grid" style="grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px">
+        <div class="card" style="padding:14px"><div class="muted" style="font-size:12px">状态</div><div style="font-size:18px;font-weight:600;color:${cfg.configured ? '#10b981' : '#94a3b8'}">${cfg.configured ? '已配置' : '未配置'}</div></div>
+        <div class="card" style="padding:14px"><div class="muted" style="font-size:12px">Bot Token</div><div style="font-size:14px;font-weight:600">${cfg.bot_token_set ? '🔑 已设置' : '✗ 未设置'}</div></div>
+        <div class="card" style="padding:14px"><div class="muted" style="font-size:12px">绑定用户数</div><div style="font-size:24px;font-weight:700">${channels.length}</div></div>
+        <div class="card" style="padding:14px"><div class="muted" style="font-size:12px">自动回复</div><div style="font-size:14px;font-weight:600;color:${cfg.auto_reply ? '#10b981' : '#94a3b8'}">${cfg.auto_reply ? '开启' : '关闭'}</div></div>
+      </div>
+
+      <div class="card">
+        <h3>📝 4 步激活指南</h3>
+        <ol style="padding-left:20px;line-height:1.9;margin:0">
+          <li>Telegram 搜 <code>@BotFather</code> → 发 <code>/newbot</code> → 按提示设置名称和 username（如 <code>AiCFO_Finance_Bot</code>）</li>
+          <li>BotFather 会返回 <code>HTTP API token</code>（格式 <code>1234567890:AAxxxxxxxx...</code>），粘贴到下面「Bot Token」框</li>
+          <li>点「💾 保存配置」→「🔌 挂 Webhook」（会自动把当前 sandbox URL 作为回调注册到 Telegram）</li>
+          <li>在 Telegram 搜你的 Bot → 发 <code>/start FIN-XXXX</code>（FIN token 在「WhatsApp 渠道」页可见）→ 绑定成功后发图片/文字测试</li>
+        </ol>
+      </div>
+
+      <div class="card">
+        <h3>🔧 Bot 凭据</h3>
+        <label class="lbl">Bot Token (BotFather 给的)</label>
+        <input id="tg_token" value="${cfg.bot_token_set ? esc(cfg.bot_token) : ''}" placeholder="1234567890:AAE-xxxxxxxxxxxxxxxxxxxxxxxxxxx" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;font-family:monospace;margin-top:4px">
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">
+          <div>
+            <label class="lbl">Bot Username (不带 @)</label>
+            <input id="tg_username" value="${esc(cfg.bot_username || '')}" placeholder="AiCFO_Finance_Bot" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px">
+          </div>
+          <div>
+            <label class="lbl">Webhook Secret</label>
+            <input id="tg_secret" value="${esc(cfg.webhook_secret || '')}" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;font-family:monospace">
+          </div>
+        </div>
+
+        <div style="display:flex;gap:20px;margin-top:12px;flex-wrap:wrap">
+          <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="tg_enabled" ${cfg.enabled ? 'checked' : ''}> 启用</label>
+          <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="tg_autoreply" ${cfg.auto_reply ? 'checked' : ''}> 自动回复</label>
+        </div>
+
+        <div style="margin-top:10px;padding:10px;background:#eff6ff;border-radius:8px;font-size:13px">
+          <b>📍 Webhook URL</b>（粘贴到 BotFather → <code>/setwebhook</code> 用，或点「挂 Webhook」按钮自动注册）<br>
+          <code style="background:#fff;padding:4px 8px;border-radius:4px;display:inline-block;margin-top:4px">${webhookUrl}</code>
+          <button class="btn btn-sm" style="margin-left:8px" onclick="navigator.clipboard.writeText('${webhookUrl}').then(()=>gwToast('已复制','ok'))">📋 复制</button>
+        </div>
+
+        <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+          <button class="btn btn-primary" id="tg_save_btn" onclick="tgSave()">💾 保存配置</button>
+          <button class="btn" id="tg_test_btn" onclick="tgTest()">🔗 测试连接 (getMe)</button>
+          <button class="btn" id="tg_hook_set_btn" onclick="tgSetWebhook()">🔌 挂 Webhook</button>
+          <button class="btn" onclick="tgDelWebhook()">🧹 取消 Webhook</button>
+          <button class="btn" onclick="anav('tgConfig')">🔄 刷新</button>
+        </div>
+        <div id="tg_result" style="margin-top:12px"></div>
+      </div>
+
+      <div class="card">
+        <h3>👥 已绑定 Telegram 用户 (${channels.length})</h3>
+        ${channels.length === 0 ? '<p class="muted">尚无绑定，让用户发 <code>/start FIN-XXXX</code> 激活。</p>' :
+          `<table style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead><tr style="background:#f8fafc;text-align:left">
+              <th style="padding:8px">TG Chat ID</th><th style="padding:8px">TG 用户</th>
+              <th style="padding:8px">归属</th><th style="padding:8px">消息数</th>
+              <th style="padding:8px">最后消息</th><th style="padding:8px">绑定时间</th>
+            </tr></thead>
+            <tbody>${channels.map(c => `
+              <tr style="border-bottom:1px solid #f1f5f9">
+                <td style="padding:8px"><code>${esc(c.tg_chat_id)}</code></td>
+                <td style="padding:8px">@${esc(c.tg_username || '-')}</td>
+                <td style="padding:8px">${esc(c.user_name || c.email || c.user_id)}</td>
+                <td style="padding:8px">${c.message_count || 0}</td>
+                <td style="padding:8px;font-size:12px">${esc((c.last_message_at || '').slice(0,16))}</td>
+                <td style="padding:8px;font-size:12px">${esc((c.linked_at || c.created_at || '').slice(0,16))}</td>
+              </tr>`).join('')}</tbody>
+          </table>`}
+      </div>
+    `;
+  } catch (e) {
+    app.innerHTML = `<div class="card"><h3>✈️ Telegram Bot</h3><p style="color:#ef4444">加载失败：${esc(e.message)}</p></div>`;
+  }
+}
+
+window.tgSave = async function () {
+  const btn = document.getElementById('tg_save_btn');
+  const box = document.getElementById('tg_result');
+  const orig = btn.innerHTML;
+  btn.disabled = true; btn.innerHTML = '⏳ 保存中…';
+  try {
+    const patch = {
+      bot_username:   document.getElementById('tg_username').value.trim(),
+      webhook_secret: document.getElementById('tg_secret').value.trim(),
+      enabled:        document.getElementById('tg_enabled').checked,
+      auto_reply:     document.getElementById('tg_autoreply').checked,
+    };
+    const t = document.getElementById('tg_token').value.trim();
+    if (t && !/\*\*\*\*/.test(t)) patch.bot_token = t;  // 没改就不覆盖脱敏值
+    const r = await fetch('/api/admin/telegram/config', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      btn.innerHTML = '✓ 已保存'; btn.style.background = '#10b981';
+      gwToast('✓ 配置已保存', 'ok');
+      box.innerHTML = `<div style="padding:10px;background:#ecfdf5;border-left:4px solid #10b981;border-radius:4px"><b style="color:#065f46">保存成功</b> · ${d.config.configured ? 'Bot 已配置' : '还需填 Bot Token'}</div>`;
+      setTimeout(() => { btn.innerHTML = orig; btn.style.background = ''; btn.disabled = false; }, 1200);
+    } else {
+      btn.innerHTML = '✗ 失败'; btn.style.background = '#ef4444';
+      gwToast('保存失败: ' + (d.error || r.status), 'err');
+      setTimeout(() => { btn.innerHTML = orig; btn.style.background = ''; btn.disabled = false; }, 1500);
+    }
+  } catch (e) {
+    gwToast('请求失败: ' + e.message, 'err');
+    btn.innerHTML = orig; btn.disabled = false;
+  }
+};
+
+window.tgTest = async function () {
+  const btn = document.getElementById('tg_test_btn');
+  const box = document.getElementById('tg_result');
+  const orig = btn.innerHTML;
+  btn.disabled = true; btn.innerHTML = '⏳ 测试中…';
+  box.innerHTML = `<div class="muted">正在调用 Telegram getMe API…</div>`;
+  const t0 = Date.now();
+  try {
+    const r = await fetch('/api/admin/telegram/test', { method: 'POST' });
+    const d = await r.json();
+    const dur = Date.now() - t0;
+    if (d.ok) {
+      box.innerHTML = `<div style="padding:12px;background:#ecfdf5;border-left:4px solid #10b981;border-radius:4px">
+        <b style="color:#065f46">✓ 连接成功 (${dur}ms)</b><br>
+        Bot ID: <code>${d.bot_id}</code> · 用户名: <code>@${esc(d.bot_username || '-')}</code> · 名称: <b>${esc(d.bot_name || '')}</b><br>
+        <span class="muted">去 Telegram 搜 <code>@${esc(d.bot_username)}</code> 即可对话</span>
+      </div>`;
+      gwToast('✓ Telegram 连通', 'ok');
+    } else {
+      box.innerHTML = `<div style="padding:12px;background:#fef2f2;border-left:4px solid #ef4444;border-radius:4px">
+        <b style="color:#991b1b">✗ 连接失败</b> (${dur}ms)<br>${esc(d.error || 'unknown')}<br>
+        <span class="muted">常见原因：token 拼写错、被禁、未保存配置</span>
+      </div>`;
+    }
+  } catch (e) {
+    box.innerHTML = `<div style="color:#ef4444">请求失败：${esc(e.message)}</div>`;
+  } finally {
+    btn.innerHTML = orig; btn.disabled = false;
+  }
+};
+
+window.tgSetWebhook = async function () {
+  const btn = document.getElementById('tg_hook_set_btn');
+  const box = document.getElementById('tg_result');
+  const orig = btn.innerHTML;
+  btn.disabled = true; btn.innerHTML = '⏳ 挂 webhook…';
+  try {
+    const r = await fetch('/api/admin/telegram/webhook/set', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ public_base: location.origin }),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      box.innerHTML = `<div style="padding:12px;background:#ecfdf5;border-left:4px solid #10b981;border-radius:4px">
+        <b style="color:#065f46">✓ Webhook 已注册</b><br>
+        <code>${esc(d.webhook_url)}</code><br>
+        <span class="muted">现在用户在 Telegram 发消息会立刻进后端 handler</span>
+      </div>`;
+      gwToast('✓ Webhook 已挂', 'ok');
+    } else {
+      box.innerHTML = `<div style="padding:12px;background:#fef2f2;border-left:4px solid #ef4444;border-radius:4px">
+        <b style="color:#991b1b">✗ 挂载失败</b><br>${esc(d.error || JSON.stringify(d.result || {}))}<br>
+        <span class="muted">提示：Telegram 要求 webhook 必须是 HTTPS（sandbox URL 自动满足）</span>
+      </div>`;
+    }
+  } catch (e) {
+    box.innerHTML = `<div style="color:#ef4444">请求失败：${esc(e.message)}</div>`;
+  } finally {
+    btn.innerHTML = orig; btn.disabled = false;
+  }
+};
+
+window.tgDelWebhook = async function () {
+  if (!confirm('确认取消 Webhook？Bot 将停止接收消息。')) return;
+  try {
+    const r = await fetch('/api/admin/telegram/webhook/delete', { method: 'POST' });
+    const d = await r.json();
+    if (d.ok) { gwToast('✓ Webhook 已取消', 'ok'); anav('tgConfig'); }
+    else      gwToast('取消失败: ' + (d.error || 'unknown'), 'err');
+  } catch (e) { gwToast('请求失败: ' + e.message, 'err'); }
+};

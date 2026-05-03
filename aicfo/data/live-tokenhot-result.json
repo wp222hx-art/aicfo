@@ -1,0 +1,237 @@
+{
+  "ping": {
+    "reasoning": {
+      "ok": true,
+      "provider": "tokenhot",
+      "base_url": "https://api.tokenhot.ai/v1",
+      "model": "claude-opus-4.7",
+      "latency_ms": 3160,
+      "reply": "pong"
+    },
+    "fast": {
+      "ok": true,
+      "provider": "tokenhot",
+      "base_url": "https://api.tokenhot.ai/v1",
+      "model": "claude-haiku-4.5",
+      "latency_ms": 2397,
+      "reply": "pong"
+    }
+  },
+  "agents": [
+    {
+      "agent": "registration",
+      "tier": "reasoning",
+      "query": "帮我检查 \"AiCFO Tech Pte Ltd\" 是否可用作新加坡公司名，并推荐 SSIC 代码",
+      "ok": true,
+      "status": 200,
+      "latency_ms": 11358,
+      "model": "master-agent",
+      "intent": "registration_agent",
+      "confidence": 0.9,
+      "need_human": false,
+      "routed_agent": {
+        "id": "agent_registration",
+        "name": "Registration Agent",
+        "type": "registration"
+      },
+      "reply_preview": "Registration Agent: assessed company name, recommended SSIC codes, ready for KYC + constitution.",
+      "citations": 3,
+      "error": null
+    },
+    {
+      "agent": "kyc",
+      "tier": "reasoning",
+      "query": "对新客户 Alice Tan（NRIC S1234567A）做 MAS Notice 626 KYC/AML 风险评级",
+      "ok": true,
+      "status": 200,
+      "latency_ms": 3871,
+      "model": "master-agent",
+      "intent": "kyc_agent",
+      "confidence": 0.88,
+      "need_human": false,
+      "routed_agent": {
+        "id": "agent_kyc",
+        "name": "KYC Agent",
+        "type": "kyc"
+      },
+      "reply_preview": "KYC Agent: AML screen clear. Ready to initiate Singpass (SG resident) or passport OCR + liveness (foreigner).",
+      "citations": 3,
+      "error": null
+    },
+    {
+      "agent": "bookkeeping",
+      "tier": "default",
+      "query": "本月有一张 Starbucks 发票 12.50 SGD，请按 SFRS 生成借贷分录，GST 税率 9%",
+      "ok": true,
+      "status": 200,
+      "latency_ms": 3891,
+      "model": "master-agent",
+      "intent": "bookkeeping_agent",
+      "confidence": 0.9,
+      "need_human": false,
+      "routed_agent": {
+        "id": "agent_bookkeeping",
+        "name": "Bookkeeping Agent",
+        "type": "bookkeeping"
+      },
+      "reply_preview": "Bookkeeping Agent: generated journal entries for 0 uncategorised transactions (SFRS compliant).",
+      "citations": 3,
+      "error": null
+    },
+    {
+      "agent": "tax",
+      "tier": "reasoning",
+      "query": "某新加坡公司 YA 2025 应税收入 150,000 SGD，首次申报，算 ECI 并说明 SUTE 豁免",
+      "ok": true,
+      "status": 200,
+      "latency_ms": 15982,
+      "model": "master-agent",
+      "intent": "tax_agent",
+      "confidence": 0.92,
+      "need_human": false,
+      "routed_agent": {
+        "id": "agent_tax",
+        "name": "Tax Agent",
+        "type": "tax"
+      },
+      "reply_preview": "Tax Agent: computed ECI using SUTR. Revenue S$0, expenses S$-0.",
+      "citations": 3,
+      "error": null
+    },
+    {
+      "agent": "secretary",
+      "tier": "default",
+      "query": "FYE 是 12-31，下一次 AGM 和 Annual Return 的截止日分别是什么时候？",
+      "ok": true,
+      "status": 200,
+      "latency_ms": 11540,
+      "model": "master-agent",
+      "intent": "secretary_agent",
+      "confidence": 0.88,
+      "need_human": false,
+      "routed_agent": {
+        "id": "agent_secretary",
+        "name": "Company Secretary Agent",
+        "type": "secretary"
+      },
+      "reply_preview": "Company Secretary Agent: drafted board resolution; AGM + AR deadlines surfaced.",
+      "citations": 3,
+      "error": null
+    },
+    {
+      "agent": "pricing",
+      "tier": "default",
+      "query": "为一家跨境电商 SaaS 公司报价（员工 15 人，月交易 500 笔），出 basic/pro/enterprise ",
+      "ok": true,
+      "status": 200,
+      "latency_ms": 4142,
+      "model": "master-agent",
+      "intent": "pricing_agent",
+      "confidence": 0.75,
+      "need_human": false,
+      "routed_agent": {
+        "id": "agent_master",
+        "name": "Master Orchestrator",
+        "type": "master"
+      },
+      "reply_preview": "Master Agent: I can help with registration, bookkeeping, tax, secretarial, KYC, legal, audit, due diligence, and pricing queries. Ask me any",
+      "citations": 3,
+      "error": null
+    },
+    {
+      "agent": "legal",
+      "tier": "reasoning",
+      "query": "起草一份新加坡雇佣合同关键条款清单（Employment Act 2019 + PDPA 合规）",
+      "ok": true,
+      "status": 200,
+      "latency_ms": 3383,
+      "model": "master-agent",
+      "intent": "legal_agent",
+      "confidence": 0.82,
+      "need_human": false,
+      "routed_agent": {
+        "id": "agent_legal",
+        "name": "Legal Agent",
+        "type": "legal"
+      },
+      "reply_preview": "Legal Agent: drafted service agreement skeleton. Qualified lawyer review required before execution.",
+      "citations": 3,
+      "error": null
+    },
+    {
+      "agent": "audit",
+      "tier": "reasoning",
+      "query": "对一家 revenue 200 万 SGD 的小公司做重要性测试，列出抽样计划",
+      "ok": true,
+      "status": 200,
+      "latency_ms": 3366,
+      "model": "master-agent",
+      "intent": "audit_agent",
+      "confidence": 0.85,
+      "need_human": false,
+      "routed_agent": {
+        "id": "agent_audit",
+        "name": "Audit Agent",
+        "type": "audit"
+      },
+      "reply_preview": "Audit Agent: working papers for SFRS 115/116/109 prepared. Flag any material items for senior reviewer.",
+      "citations": 3,
+      "error": null
+    },
+    {
+      "agent": "due_diligence",
+      "tier": "reasoning",
+      "query": "对目标公司 Target Pte Ltd 做 M&A 尽调，列出股权结构、制裁筛查、诉讼四大模块",
+      "ok": true,
+      "status": 200,
+      "latency_ms": 3927,
+      "model": "master-agent",
+      "intent": "dd_agent",
+      "confidence": 0.85,
+      "need_human": false,
+      "routed_agent": {
+        "id": "agent_dd",
+        "name": "Due Diligence Agent",
+        "type": "dd"
+      },
+      "reply_preview": "DD Agent: data room index + UBO map + red-flag scan generated. Export as zip from the DD workspace.",
+      "citations": 3,
+      "error": null
+    },
+    {
+      "agent": "master",
+      "tier": "reasoning",
+      "query": "我是初创公司，想在新加坡注册+每月记账+年底报税，帮我规划完整路径并路由给对应 Agent",
+      "ok": true,
+      "status": 200,
+      "latency_ms": 4728,
+      "model": "master-agent",
+      "intent": "general",
+      "confidence": 0.75,
+      "need_human": false,
+      "routed_agent": {
+        "id": "agent_master",
+        "name": "Master Orchestrator",
+        "type": "master"
+      },
+      "reply_preview": "Master Agent: I can help with registration, bookkeeping, tax, secretarial, KYC, legal, audit, due diligence, and pricing queries. Ask me any",
+      "citations": 3,
+      "error": null
+    }
+  ],
+  "summary": {
+    "ping_reasoning_ok": true,
+    "ping_reasoning_latency": 3160,
+    "ping_fast_ok": true,
+    "ping_fast_latency": 2397,
+    "agents_total": 10,
+    "agents_ok": 10,
+    "agents_failed": 0,
+    "avg_agent_latency_ms": 6619,
+    "high_confidence_count": 10,
+    "need_human_count": 0,
+    "llm_gateway_total_calls": 32,
+    "llm_gateway_success_rate": 56.3,
+    "llm_gateway_avg_latency": 4276
+  }
+}

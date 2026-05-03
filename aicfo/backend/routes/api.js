@@ -13,6 +13,8 @@ const aiKB   = require('../services/ai-kb-builder');
 const fileIngest = require('../services/file-ingest');
 const waBot = require('../services/wa-bot');
 const waMeta = require('../services/wa-meta');
+const uploadPortal = require('../services/upload-portal');
+const tgBot = require('../services/telegram-bot');
 const subs  = require('../services/subscription');
 const llmGateway = require('../services/llm-gateway');
 const sgRegistry = require('../services/sg-registry');
@@ -1249,6 +1251,126 @@ router.get('/admin/wa/channels', (req, res) => {
     LEFT JOIN companies c ON c.id=w.company_id
     ORDER BY w.created_at DESC LIMIT 200`).all();
   res.json({ ok: true, channels: rows });
+});
+
+// ================================================================================
+// Upload Portal (方案 A — 专属链接上传账单)
+// ================================================================================
+// 生成新链接：POST /upload-portal/tokens  body:{ user_id, company_id?, label?, expires_days?, max_uploads? }
+router.post('/upload-portal/tokens', async (req, res) => {
+  try {
+    const { user_id, company_id, label, expires_days, max_uploads } = req.body || {};
+    if (!user_id) return res.status(400).json({ ok: false, error: 'user_id required' });
+    const public_base = req.headers['x-public-base'] || process.env.AICFO_PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`;
+    const r = await uploadPortal.generateToken({ user_id, company_id, label, expires_days: +expires_days || 0, max_uploads: +max_uploads || 0, public_base });
+    res.json({ ok: true, ...r });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// 列表 (我的): GET /upload-portal/tokens?user_id=xxx
+router.get('/upload-portal/tokens', (req, res) => {
+  const { user_id } = req.query;
+  if (!user_id) return res.status(400).json({ ok: false, error: 'user_id required' });
+  res.json({ ok: true, tokens: uploadPortal.listTokens({ user_id }) });
+});
+
+// 撤销：POST /upload-portal/tokens/:token/revoke
+router.post('/upload-portal/tokens/:token/revoke', (req, res) => {
+  res.json(uploadPortal.revokeToken(req.params.token));
+});
+
+// 公共元信息：GET /upload-portal/public/:token  （上传页前端加载时调用，展示公司名/链接名）
+router.get('/upload-portal/public/:token', (req, res) => {
+  const tk = uploadPortal.getTokenInfo(req.params.token);
+  if (!tk) return res.status(404).json({ ok: false, error: 'not found' });
+  const v = uploadPortal.validateToken(req.params.token);
+  res.json({
+    ok: v.ok, error: v.error || null,
+    token: req.params.token,
+    label: tk.label,
+    company_name: tk.company_name || tk.user_name || 'AiCFO',
+    user_name: tk.user_name,
+    expires_at: tk.expires_at,
+    uploads_count: tk.uploads_count,
+    max_uploads: tk.max_uploads,
+  });
+});
+
+// 公共提交：POST /upload-portal/public/:token/submit  multipart: files[], text, submitter_name, submitter_phone
+router.post('/upload-portal/public/:token/submit', upload.array('files', 10), async (req, res) => {
+  try {
+    const { text = '', submitter_name = '', submitter_phone = '' } = req.body || {};
+    const r = await uploadPortal.submitFiles({
+      token: req.params.token,
+      files: req.files || [],
+      text, submitter_name, submitter_phone,
+      ip: req.ip, user_agent: req.get('user-agent') || '',
+    });
+    res.json(r);
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// 管理列表：GET /admin/upload-portal/tokens
+router.get('/admin/upload-portal/tokens', (req, res) => {
+  res.json({ ok: true, tokens: uploadPortal.listAllTokens({ limit: +req.query.limit || 100 }) });
+});
+
+// ================================================================================
+// Telegram Bot (方案 C — 国际/华人全覆盖)
+// ================================================================================
+// 读取配置（bot_token 脱敏）
+router.get('/admin/telegram/config', (req, res) => {
+  res.json({ ok: true, config: tgBot.getMaskedConfig() });
+});
+
+// 保存配置：POST /admin/telegram/config body:{ bot_token?, bot_username?, webhook_secret?, enabled?, auto_reply? }
+router.post('/admin/telegram/config', (req, res) => {
+  const next = tgBot.updateConfig(req.body || {});
+  res.json({ ok: true, config: tgBot.getMaskedConfig() });
+});
+
+// 连通测试 getMe：POST /admin/telegram/test
+router.post('/admin/telegram/test', async (req, res) => {
+  const r = await tgBot.testConnection();
+  res.json(r);
+});
+
+// 挂 webhook：POST /admin/telegram/webhook/set body:{ webhook_url }
+router.post('/admin/telegram/webhook/set', async (req, res) => {
+  const public_base = req.body?.public_base || process.env.AICFO_PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`;
+  const url = req.body?.webhook_url || `${public_base}/api/telegram/webhook`;
+  const r = await tgBot.setWebhook(url);
+  res.json({ ok: r.ok, webhook_url: url, result: r.result, error: r.error });
+});
+
+// 取消 webhook：POST /admin/telegram/webhook/delete
+router.post('/admin/telegram/webhook/delete', async (req, res) => {
+  res.json(await tgBot.deleteWebhook());
+});
+
+// Telegram webhook 入口（Meta 对应 /wa/webhook/meta）
+router.post('/telegram/webhook', express.json({ limit: '20mb' }), async (req, res) => {
+  try {
+    // 校验 secret_token (Telegram 会在 header 里带 X-Telegram-Bot-Api-Secret-Token)
+    const cfg = tgBot.readConfig();
+    const secret = req.headers['x-telegram-bot-api-secret-token'];
+    if (cfg.webhook_secret && secret !== cfg.webhook_secret) {
+      return res.status(403).json({ ok: false, error: 'invalid secret' });
+    }
+    const r = await tgBot.handleUpdate(req.body || {});
+    res.json({ ok: true, handled: r });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// 管理：手动触发一次 handleUpdate（用于联调）
+router.post('/admin/telegram/simulate', async (req, res) => {
+  const r = await tgBot.handleUpdate(req.body || {});
+  res.json({ ok: true, result: r });
+});
+
+// 列出 TG 已绑定用户
+router.get('/admin/telegram/channels', (req, res) => {
+  res.json({ ok: true, channels: tgBot.listChannels({ limit: +req.query.limit || 100 }) });
 });
 
 // ================================================================================

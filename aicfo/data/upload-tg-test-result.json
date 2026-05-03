@@ -1,0 +1,170 @@
+{
+  "ts": "2026-05-03T12:54:44.743Z",
+  "base": "http://localhost:3000",
+  "results": {
+    "ok": 35,
+    "fail": 0,
+    "tests": [
+      {
+        "name": "POST /upload-portal/tokens 200",
+        "ok": true,
+        "extra": "status=200"
+      },
+      {
+        "name": "返回 token UP-xxxx",
+        "ok": true,
+        "extra": "token=UP-839F480DA8"
+      },
+      {
+        "name": "返回完整 URL",
+        "ok": true,
+        "extra": "url=http://localhost:3000/upload/UP-839F480DA8"
+      },
+      {
+        "name": "返回二维码 DataURL",
+        "ok": true
+      },
+      {
+        "name": "GET /upload-portal/public/:token → ok",
+        "ok": true
+      },
+      {
+        "name": "元信息含 company_name",
+        "ok": true
+      },
+      {
+        "name": "元信息含 label = \"2026 报销\"",
+        "ok": true
+      },
+      {
+        "name": "纯文字提交 200",
+        "ok": true,
+        "extra": "status=200"
+      },
+      {
+        "name": "提交返回 ok",
+        "ok": true,
+        "extra": ""
+      },
+      {
+        "name": "返回 classified_as",
+        "ok": true,
+        "extra": "cls=other"
+      },
+      {
+        "name": "返回 submission_id",
+        "ok": true
+      },
+      {
+        "name": "图片提交 200",
+        "ok": true,
+        "extra": "status=200"
+      },
+      {
+        "name": "图片提交 ok",
+        "ok": true,
+        "extra": ""
+      },
+      {
+        "name": "file_count = 1",
+        "ok": true,
+        "extra": "file_count=1"
+      },
+      {
+        "name": "uploads_count ≥ 2",
+        "ok": true,
+        "extra": "count=2"
+      },
+      {
+        "name": "列表 200",
+        "ok": true
+      },
+      {
+        "name": "列表含刚创建的 token",
+        "ok": true
+      },
+      {
+        "name": "撤销 ok",
+        "ok": true
+      },
+      {
+        "name": "撤销后 ok=false",
+        "ok": true,
+        "extra": "链接已停用"
+      },
+      {
+        "name": "GET /admin/telegram/config 200",
+        "ok": true
+      },
+      {
+        "name": "configured 初始为 false",
+        "ok": true,
+        "extra": "bot_token_set=false"
+      },
+      {
+        "name": "POST /admin/telegram/config 200",
+        "ok": true
+      },
+      {
+        "name": "bot_token 已脱敏",
+        "ok": true
+      },
+      {
+        "name": "无 secret → 403",
+        "ok": true,
+        "extra": "status=403"
+      },
+      {
+        "name": "未绑定消息 200",
+        "ok": true
+      },
+      {
+        "name": "返回 handled.error=unbound",
+        "ok": true,
+        "extra": "error=unbound"
+      },
+      {
+        "name": "绑定消息 200",
+        "ok": true
+      },
+      {
+        "name": "绑定成功 linked=true",
+        "ok": true,
+        "extra": "{\"ok\":true,\"linked\":true,\"user_id\":\"usr_demo_001\"}"
+      },
+      {
+        "name": "发票消息 200",
+        "ok": true
+      },
+      {
+        "name": "返回 handled.ok",
+        "ok": true,
+        "extra": "{\"ok\":true,\"classified_as\":\"invoice\",\"confidence\":0.8,\"linked_entity_id\":\"inv_wa_a8c73e\"}"
+      },
+      {
+        "name": "classified_as 可能为 invoice",
+        "ok": true,
+        "extra": "cls=invoice"
+      },
+      {
+        "name": "GET /admin/telegram/channels 200",
+        "ok": true
+      },
+      {
+        "name": "列表 ≥ 1",
+        "ok": true,
+        "extra": "count=1"
+      },
+      {
+        "name": "testConnection 可调用",
+        "ok": true,
+        "extra": "status=200"
+      },
+      {
+        "name": "假 token 返回 ok=false",
+        "ok": true,
+        "extra": "error=Unauthorized"
+      }
+    ]
+  }
+}
