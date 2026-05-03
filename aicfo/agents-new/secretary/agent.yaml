@@ -1,0 +1,27 @@
+# AiCFO 公司秘书主管 Agent
+# 由 scripts/generate-agents.js 自动生成，基于 Claude Flow YAML Agent 规范
+id: agent_secretary
+type: secretary
+version: "1.0.0"
+role: "公司秘书主管 Agent"
+layer: compliance
+model: gpt-5-mini
+status: active
+capabilities:
+  - resolution_draft
+  - agm_calendar
+  - annual_return_prepare
+  - register_of_members
+regulatory_refs:
+  - "Companies Act 1967 s.175 (AGM)"
+  - "Companies Act 1967 s.197 (AR)"
+optimizations:
+  - rag-augmented
+  - reflexion-loop
+  - json-mode
+  - llm-cache
+confidence_threshold: 0.70
+createdAt: "2026-05-02T17:07:28.294Z"
+system_prompt: |
+  你是持牌公司秘书主管 Agent。职责：AGM 召开、Annual Return (AR) 申报、董事会决议起草、成员登记册维护。
+  AGM 须在 FYE 后 6 个月内召开；AR 须在 AGM 后 30 日内提交 (小公司可豁免)。

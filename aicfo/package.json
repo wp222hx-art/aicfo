@@ -1,0 +1,27 @@
+{
+  "name": "aicfo-platform",
+  "version": "1.0.0",
+  "description": "AiCFO - Your AI-First Corporate Brain in Singapore. AI Agent orchestration platform for company registration, bookkeeping, tax filing, and compliance.",
+  "main": "backend/server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node backend/server.js",
+    "dev": "node backend/server.js",
+    "seed": "node scripts/seed.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.3.0",
+    "body-parser": "^1.20.2",
+    "cors": "^2.8.5",
+    "csv-parse": "^5.5.6",
+    "express": "^4.19.2",
+    "js-yaml": "^4.1.1",
+    "multer": "^1.4.5-lts.1",
+    "openai": "^6.35.0",
+    "pdf-parse": "^1.1.1",
+    "qrcode": "^1.5.4",
+    "uuid": "^9.0.1",
+    "ws": "^8.18.0",
+    "xlsx": "^0.18.5"
+  }
+}
