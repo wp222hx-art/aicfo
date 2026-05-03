@@ -15,6 +15,7 @@ const waBot = require('../services/wa-bot');
 const waMeta = require('../services/wa-meta');
 const uploadPortal = require('../services/upload-portal');
 const tgBot = require('../services/telegram-bot');
+const archive = require('../services/company-archive');
 const subs  = require('../services/subscription');
 const llmGateway = require('../services/llm-gateway');
 const sgRegistry = require('../services/sg-registry');
@@ -1257,6 +1258,7 @@ router.get('/admin/wa/channels', (req, res) => {
 // Upload Portal (方案 A — 专属链接上传账单)
 // ================================================================================
 // 生成新链接：POST /upload-portal/tokens  body:{ user_id, company_id?, label?, expires_days?, max_uploads? }
+// 关键：一个 token 永久绑定一家公司 → 所有上传一律归属该公司
 router.post('/upload-portal/tokens', async (req, res) => {
   try {
     const { user_id, company_id, label, expires_days, max_uploads } = req.body || {};
@@ -1264,7 +1266,25 @@ router.post('/upload-portal/tokens', async (req, res) => {
     const public_base = req.headers['x-public-base'] || process.env.AICFO_PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`;
     const r = await uploadPortal.generateToken({ user_id, company_id, label, expires_days: +expires_days || 0, max_uploads: +max_uploads || 0, public_base });
     res.json({ ok: true, ...r });
-  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+  } catch (e) {
+    // 业务错（未绑定公司、公司不存在等）→ 400；其它 → 500
+    const businessErr = /未绑定|未关联|不存在|必填|必须|公司/.test(e.message);
+    res.status(businessErr ? 400 : 500).json({ ok: false, error: e.message });
+  }
+});
+
+// 列出当前 user 可用公司（供 Admin UI 下拉选择用）
+router.get('/upload-portal/my-companies', (req, res) => {
+  const { user_id } = req.query;
+  if (!user_id) return res.status(400).json({ ok: false, error: 'user_id required' });
+  const rows = db.prepare(`
+    SELECT DISTINCT c.id, c.name, c.uen, c.status
+    FROM companies c
+    LEFT JOIN registration_orders o ON o.company_id = c.id
+    WHERE c.created_by = ? OR o.user_id = ?
+    ORDER BY c.created_at ASC
+  `).all(user_id, user_id);
+  res.json({ ok: true, companies: rows });
 });
 
 // 列表 (我的): GET /upload-portal/tokens?user_id=xxx
@@ -1371,6 +1391,43 @@ router.post('/admin/telegram/simulate', async (req, res) => {
 // 列出 TG 已绑定用户
 router.get('/admin/telegram/channels', (req, res) => {
   res.json({ ok: true, channels: tgBot.listChannels({ limit: +req.query.limit || 100 }) });
+});
+
+// ================================================================================
+// Company Archive (企业档案库) — 每家企业独立档案聚合
+// ================================================================================
+// 列出所有企业 + 摘要（Admin 首屏用）
+router.get('/admin/archive/companies', (req, res) => {
+  try {
+    const rows = archive.listAllCompaniesWithSummary({ limit: +req.query.limit || 200 });
+    res.json({ ok: true, companies: rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// 单个企业完整档案
+router.get('/admin/archive/company/:id', (req, res) => {
+  try {
+    const data = archive.getFullArchive(req.params.id);
+    if (!data) return res.status(404).json({ ok: false, error: 'company not found' });
+    res.json({ ok: true, archive: data });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// 分节接口（按需加载某一模块，前端可以减小一次性数据量）
+router.get('/admin/archive/company/:id/basic',    (req, res) => res.json({ ok: true, data: archive.getBasicInfo(req.params.id) }));
+router.get('/admin/archive/company/:id/expenses', (req, res) => res.json({ ok: true, data: archive.getExpenses(req.params.id, { limit: +req.query.limit || 200 }) }));
+router.get('/admin/archive/company/:id/tax',      (req, res) => res.json({ ok: true, data: archive.getTax(req.params.id) }));
+router.get('/admin/archive/company/:id/reports',  (req, res) => res.json({ ok: true, data: archive.getFinancialReports(req.params.id) }));
+router.get('/admin/archive/company/:id/history',  (req, res) => res.json({ ok: true, data: archive.getHistory(req.params.id, { limit: +req.query.limit || 50 }) }));
+router.get('/admin/archive/company/:id/billing',  (req, res) => res.json({ ok: true, data: archive.getSubscriptionAndPayments(req.params.id) }));
+router.get('/admin/archive/company/:id/timeline', (req, res) => res.json({ ok: true, data: archive.getTimeline(req.params.id, { limit: +req.query.limit || 100 }) }));
+
+// 档案快照（写入 documents 表，kind='archive_snapshot'）
+router.post('/admin/archive/company/:id/snapshot', (req, res) => {
+  try {
+    const r = archive.createSnapshot(req.params.id, { snapshot_name: req.body?.name, created_by: req.body?.created_by });
+    res.json(r);
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 // ================================================================================

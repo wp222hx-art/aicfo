@@ -18,17 +18,48 @@ function mkToken() {
 }
 
 // 1. 生成链接
+//    关键保证：一个 token 锁定一家公司（company_id）
+//    - 显式传入 company_id → 用它
+//    - 未传 → 自动查 user 的默认公司（companies 表里 user_id 匹配的第一条）
+//    - 仍找不到 → 抛错，禁止创建"孤儿链接"
 async function generateToken({ user_id, company_id = null, label = null, expires_days = 0, max_uploads = 0, created_by = null, public_base = '' }) {
+  if (!user_id) throw new Error('user_id 必填');
+
+  // 自动推断 company_id（若未显式指定）
+  //   优先级: 1) 用户创建的公司  2) 用户的 registration_order 关联的公司
+  let effectiveCompanyId = company_id;
+  if (!effectiveCompanyId) {
+    const row1 = db.prepare(`SELECT id FROM companies WHERE created_by=? ORDER BY created_at ASC LIMIT 1`).get(user_id);
+    if (row1?.id) effectiveCompanyId = row1.id;
+    else {
+      const row2 = db.prepare(`SELECT company_id FROM registration_orders WHERE user_id=? AND company_id IS NOT NULL ORDER BY created_at ASC LIMIT 1`).get(user_id);
+      if (row2?.company_id) effectiveCompanyId = row2.company_id;
+    }
+  }
+  if (!effectiveCompanyId) {
+    // 严格模式：user 没有公司则拒绝创建
+    const anyCompany = db.prepare(`SELECT COUNT(*) n FROM companies`).get()?.n || 0;
+    throw new Error(
+      anyCompany === 0
+        ? '系统中还没有任何公司，请先完成注册流程（registration_orders → companies）'
+        : `用户 ${user_id} 未关联任何公司，无法生成企业专属上传链接。请显式传入 company_id，或先完成公司注册。`
+    );
+  }
+
+  // 校验 company 是否存在
+  const companyExists = db.prepare(`SELECT id, name FROM companies WHERE id=?`).get(effectiveCompanyId);
+  if (!companyExists) throw new Error(`company_id=${effectiveCompanyId} 不存在`);
+
   const token = mkToken();
   const expires_at = expires_days > 0 ? new Date(Date.now() + expires_days * 86400_000).toISOString() : null;
   db.prepare(`
     INSERT INTO upload_tokens(token, user_id, company_id, label, max_uploads, expires_at, created_by, created_at)
     VALUES(?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-  `).run(token, user_id, company_id, label || '上传链接', max_uploads, expires_at, created_by);
+  `).run(token, user_id, effectiveCompanyId, label || '上传链接', max_uploads, expires_at, created_by);
 
   const url = public_base ? `${public_base.replace(/\/+$/, '')}/upload/${token}` : `/upload/${token}`;
   const qr = await QRCode.toDataURL(url, { errorCorrectionLevel: 'M', margin: 1, width: 320 });
-  return { token, url, qr_data_url: qr, expires_at, max_uploads };
+  return { token, url, qr_data_url: qr, expires_at, max_uploads, company_id: effectiveCompanyId, company_name: companyExists.name };
 }
 
 // 2. 校验链接是否可用
@@ -38,6 +69,10 @@ function validateToken(token) {
   if (row.status !== 'active') return { ok: false, error: '链接已停用' };
   if (row.expires_at && new Date(row.expires_at) < new Date()) return { ok: false, error: '链接已过期' };
   if (row.max_uploads > 0 && row.uploads_count >= row.max_uploads) return { ok: false, error: '上传次数已达上限' };
+  // 企业归属完整性校验（防御历史孤儿 token）
+  if (!row.company_id) return { ok: false, error: '该链接未绑定企业，请联系管理员重新生成' };
+  const company = db.prepare(`SELECT id FROM companies WHERE id=?`).get(row.company_id);
+  if (!company) return { ok: false, error: '链接绑定的企业已被删除' };
   return { ok: true, token: row };
 }
 

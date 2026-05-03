@@ -25,7 +25,7 @@ function anav(route, params = {}) {
   astate.route = route;
   astate.params = params;
   document.querySelectorAll('.sidebar a').forEach(a => a.classList.toggle('active', a.dataset.route === route));
-  const routes = { overview, queue, agents, runs, playground, rag, training, retrieval, companies, users, archives, waChannels, llmGateway, waConfig, uploadPortal, tgConfig };
+  const routes = { overview, queue, agents, runs, playground, rag, training, retrieval, companies, users, archives, waChannels, llmGateway, waConfig, uploadPortal, tgConfig, companyArchive, companyArchiveDetail };
   (routes[route] || overview)(params);
   window.scrollTo(0, 0);
 }
@@ -1795,4 +1795,556 @@ window.tgDelWebhook = async function () {
     if (d.ok) { gwToast('✓ Webhook 已取消', 'ok'); anav('tgConfig'); }
     else      gwToast('取消失败: ' + (d.error || 'unknown'), 'err');
   } catch (e) { gwToast('请求失败: ' + e.message, 'err'); }
+};
+
+// ============================================================================
+// Company Archive — 企业档案库（列表页）
+// ============================================================================
+async function companyArchive() {
+  const app = document.getElementById('av');
+  if (!app) return;
+  app.innerHTML = `<div class="card"><h3>📚 企业档案库</h3><p class="muted">加载中…</p></div>`;
+  try {
+    const res = await fetch('/api/admin/archive/companies?limit=300').then(r => r.json());
+    const cos = res.companies || [];
+    const totalTxn = cos.reduce((s, c) => s + (c.stats?.transactions || 0), 0);
+    const totalInv = cos.reduce((s, c) => s + (c.stats?.invoices || 0), 0);
+    const totalRev = cos.reduce((s, c) => s + (c.stats?.revenue || 0), 0);
+    const totalDocs = cos.reduce((s, c) => s + (c.stats?.documents || 0), 0);
+
+    app.innerHTML = `
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <h3 style="margin:0">📚 企业档案库 (Company Archive)</h3>
+          <span class="muted">每家企业一个独立档案 · 消费记录 / 报税 / 财报 / 历史记录 全聚合</span>
+        </div>
+      </div>
+
+      <div class="grid" style="grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px">
+        <div class="card" style="padding:14px"><div class="muted" style="font-size:12px">档案数</div><div style="font-size:24px;font-weight:700">${cos.length}</div></div>
+        <div class="card" style="padding:14px"><div class="muted" style="font-size:12px">累计交易</div><div style="font-size:24px;font-weight:700;color:#2563eb">${totalTxn}</div></div>
+        <div class="card" style="padding:14px"><div class="muted" style="font-size:12px">累计发票</div><div style="font-size:24px;font-weight:700;color:#7c3aed">${totalInv}</div></div>
+        <div class="card" style="padding:14px"><div class="muted" style="font-size:12px">累计营收</div><div style="font-size:20px;font-weight:700;color:#10b981">S$ ${(totalRev/1000).toFixed(1)}k</div></div>
+      </div>
+
+      <div class="card">
+        <h3>全部企业档案 (${cos.length})</h3>
+        <input id="arc_filter" placeholder="🔍 搜索公司名/UEN/状态…" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px" oninput="arcFilter(this.value)">
+
+        <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px" id="arc_table">
+          <thead><tr style="background:#f8fafc;text-align:left">
+            <th style="padding:10px">企业</th>
+            <th style="padding:10px">UEN / 状态</th>
+            <th style="padding:10px">交易</th>
+            <th style="padding:10px">发票</th>
+            <th style="padding:10px">营收</th>
+            <th style="padding:10px">支出</th>
+            <th style="padding:10px">文档</th>
+            <th style="padding:10px">税务</th>
+            <th style="padding:10px">上传</th>
+            <th style="padding:10px">最后活动</th>
+            <th style="padding:10px">操作</th>
+          </tr></thead>
+          <tbody>
+            ${cos.map(c => `
+              <tr style="border-bottom:1px solid #f1f5f9;cursor:pointer" onclick="anav('companyArchiveDetail',{id:'${esc(c.id)}'})">
+                <td style="padding:10px">
+                  <div style="font-weight:600">${esc(c.name || '-')}</div>
+                  <div class="muted" style="font-size:11px">${esc(c.segment || 'local_sg')} · ${esc(c.subscription_tier || 'basic')}</div>
+                </td>
+                <td style="padding:10px">
+                  <div style="font-family:monospace;font-size:12px">${esc(c.uen || '—')}</div>
+                  <div><span style="padding:2px 8px;border-radius:12px;background:${c.status === 'active' ? '#dcfce7' : '#fef3c7'};color:${c.status === 'active' ? '#166534' : '#92400e'};font-size:11px">${esc(c.status)}</span></div>
+                </td>
+                <td style="padding:10px">${c.stats.transactions}</td>
+                <td style="padding:10px">${c.stats.invoices}</td>
+                <td style="padding:10px;color:#10b981;font-weight:600">S$ ${(c.stats.revenue || 0).toFixed(0)}</td>
+                <td style="padding:10px;color:#ef4444">S$ ${(c.stats.expense || 0).toFixed(0)}</td>
+                <td style="padding:10px">${c.stats.documents}</td>
+                <td style="padding:10px">${c.stats.tax_filings}</td>
+                <td style="padding:10px">${c.stats.upload_submissions} <span class="muted" style="font-size:11px">/ ${c.stats.active_upload_tokens}link</span></td>
+                <td style="padding:10px;font-size:11px" class="muted">${esc((c.last_activity_at || '').slice(0,16))}</td>
+                <td style="padding:10px" onclick="event.stopPropagation()">
+                  <button class="btn btn-sm btn-primary" onclick="anav('companyArchiveDetail',{id:'${esc(c.id)}'})">📂 查看档案</button>
+                </td>
+              </tr>`).join('') || `<tr><td colspan="11" style="padding:30px;text-align:center;color:#94a3b8">系统还没有任何企业档案</td></tr>`}
+          </tbody>
+        </table></div>
+      </div>
+    `;
+  } catch (e) {
+    app.innerHTML = `<div class="card"><h3>📚 企业档案库</h3><p style="color:#ef4444">加载失败：${esc(e.message)}</p></div>`;
+  }
+}
+
+window.arcFilter = function (q) {
+  q = (q || '').toLowerCase().trim();
+  document.querySelectorAll('#arc_table tbody tr').forEach(tr => {
+    tr.style.display = !q || tr.textContent.toLowerCase().includes(q) ? '' : 'none';
+  });
+};
+
+// ============================================================================
+// Company Archive Detail — 单家公司的完整档案详情页（带 tabs）
+// ============================================================================
+async function companyArchiveDetail(params) {
+  const app = document.getElementById('av');
+  if (!app) return;
+  const id = params?.id;
+  if (!id) { app.innerHTML = `<div class="card">缺少 company id <a onclick="anav('companyArchive')">返回列表</a></div>`; return; }
+
+  app.innerHTML = `<div class="card"><h3>📂 加载企业档案…</h3><p class="muted">正在聚合交易、发票、税务、报表、历史记录…</p></div>`;
+
+  try {
+    const res = await fetch(`/api/admin/archive/company/${id}`).then(r => r.json());
+    if (!res.ok) { app.innerHTML = `<div class="card"><p style="color:#ef4444">加载失败：${esc(res.error || '未找到')}</p><a onclick="anav('companyArchive')">← 返回列表</a></div>`; return; }
+    const a = res.archive;
+    const c = a.company;
+
+    // 保存到全局便于 tab 切换
+    window._currentArchive = a;
+
+    app.innerHTML = `
+      <div class="card" style="background:linear-gradient(135deg,#2563eb,#1e40af);color:#fff">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+          <div>
+            <a onclick="anav('companyArchive')" style="color:rgba(255,255,255,0.9);cursor:pointer;font-size:13px">← 返回企业列表</a>
+            <h2 style="margin:6px 0 0">📂 ${esc(c.name)}</h2>
+            <div style="font-size:13px;opacity:0.9;margin-top:4px">
+              <code style="background:rgba(255,255,255,0.2);padding:2px 8px;border-radius:4px">${esc(c.id)}</code>
+              ${c.uen ? `· UEN <code style="background:rgba(255,255,255,0.2);padding:2px 8px;border-radius:4px">${esc(c.uen)}</code>` : ''}
+              · ${esc(c.segment || 'local_sg')} · ${esc(c.subscription_tier || 'basic')}
+              · 创建于 ${esc((c.created_at || '').slice(0,10))}
+            </div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn" style="background:rgba(255,255,255,0.15);color:#fff;border:1px solid rgba(255,255,255,0.3)" onclick="arcSnapshot('${esc(id)}')">📸 生成快照</button>
+            <button class="btn" style="background:rgba(255,255,255,0.15);color:#fff;border:1px solid rgba(255,255,255,0.3)" onclick="arcExport()">⬇️ 导出 JSON</button>
+            <button class="btn" style="background:#fff;color:#2563eb" onclick="arcNewService('${esc(id)}')">🚀 发起新服务</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid" style="grid-template-columns:repeat(6,1fr);gap:10px;margin:14px 0">
+        <div class="card" style="padding:12px"><div class="muted" style="font-size:11px">交易</div><div style="font-size:22px;font-weight:700">${a.summary.stats.transactions}</div></div>
+        <div class="card" style="padding:12px"><div class="muted" style="font-size:11px">发票</div><div style="font-size:22px;font-weight:700">${a.summary.stats.invoices}</div></div>
+        <div class="card" style="padding:12px"><div class="muted" style="font-size:11px">营收</div><div style="font-size:18px;font-weight:700;color:#10b981">S$ ${(a.summary.stats.revenue||0).toFixed(0)}</div></div>
+        <div class="card" style="padding:12px"><div class="muted" style="font-size:11px">支出</div><div style="font-size:18px;font-weight:700;color:#ef4444">S$ ${(a.summary.stats.expense||0).toFixed(0)}</div></div>
+        <div class="card" style="padding:12px"><div class="muted" style="font-size:11px">文档</div><div style="font-size:22px;font-weight:700">${a.summary.stats.documents}</div></div>
+        <div class="card" style="padding:12px"><div class="muted" style="font-size:11px">税务</div><div style="font-size:22px;font-weight:700">${a.summary.stats.tax_filings}</div></div>
+      </div>
+
+      <div class="card" style="padding:0">
+        <div style="display:flex;border-bottom:1px solid #e2e8f0;overflow-x:auto" id="arc_tabs">
+          <div class="arc-tab active" data-tab="overview" onclick="arcTab('overview')">📊 概览</div>
+          <div class="arc-tab" data-tab="basic" onclick="arcTab('basic')">🏢 基础信息</div>
+          <div class="arc-tab" data-tab="expenses" onclick="arcTab('expenses')">💰 消费记录</div>
+          <div class="arc-tab" data-tab="tax" onclick="arcTab('tax')">🏛️ 报税信息</div>
+          <div class="arc-tab" data-tab="reports" onclick="arcTab('reports')">📈 财报</div>
+          <div class="arc-tab" data-tab="history" onclick="arcTab('history')">🕑 历史记录</div>
+          <div class="arc-tab" data-tab="timeline" onclick="arcTab('timeline')">⏳ 时间线</div>
+          <div class="arc-tab" data-tab="billing" onclick="arcTab('billing')">💳 订阅支付</div>
+        </div>
+        <div id="arc_tab_body" style="padding:16px"></div>
+      </div>
+
+      <style>
+        .arc-tab { padding:12px 18px; cursor:pointer; font-size:14px; white-space:nowrap; border-bottom:2px solid transparent; color:#64748b; transition:all .15s }
+        .arc-tab:hover { color:#2563eb; background:#f8fafc }
+        .arc-tab.active { color:#2563eb; border-bottom-color:#2563eb; background:#fff; font-weight:600 }
+        .arc-list-item { padding:10px;border-bottom:1px solid #f1f5f9;display:flex;justify-content:space-between;align-items:flex-start;gap:10px }
+        .arc-list-item:last-child { border-bottom:none }
+        .arc-ev-icon { font-size:18px;flex-shrink:0 }
+        table.arc-tbl { width:100%;border-collapse:collapse;font-size:13px }
+        table.arc-tbl th { background:#f8fafc;text-align:left;padding:8px }
+        table.arc-tbl td { padding:8px;border-bottom:1px solid #f1f5f9 }
+      </style>
+    `;
+    arcTab('overview');
+  } catch (e) {
+    app.innerHTML = `<div class="card"><p style="color:#ef4444">加载失败：${esc(e.message)}</p></div>`;
+  }
+}
+
+window.arcTab = function (tab) {
+  document.querySelectorAll('.arc-tab').forEach(el => el.classList.toggle('active', el.dataset.tab === tab));
+  const body = document.getElementById('arc_tab_body');
+  const a = window._currentArchive;
+  if (!a) return;
+  if (tab === 'overview')   body.innerHTML = arcRenderOverview(a);
+  if (tab === 'basic')      body.innerHTML = arcRenderBasic(a);
+  if (tab === 'expenses')   body.innerHTML = arcRenderExpenses(a);
+  if (tab === 'tax')        body.innerHTML = arcRenderTax(a);
+  if (tab === 'reports')    body.innerHTML = arcRenderReports(a);
+  if (tab === 'history')    body.innerHTML = arcRenderHistory(a);
+  if (tab === 'timeline')   body.innerHTML = arcRenderTimeline(a);
+  if (tab === 'billing')    body.innerHTML = arcRenderBilling(a);
+};
+
+function arcRenderOverview(a) {
+  const c = a.company;
+  const upcoming = a.tax?.upcoming_deadlines || [];
+  const recentEvents = (a.timeline || []).slice(0, 15);
+  return `
+    <div class="grid" style="grid-template-columns:1fr 1fr;gap:16px">
+      <div>
+        <h4>🏢 企业快照</h4>
+        <table class="arc-tbl">
+          <tr><td class="muted">公司名称</td><td><b>${esc(c.name)}</b></td></tr>
+          <tr><td class="muted">UEN</td><td><code>${esc(c.uen || '—')}</code></td></tr>
+          <tr><td class="muted">状态</td><td>${esc(c.status)}</td></tr>
+          <tr><td class="muted">FYE</td><td>${esc(c.fye || '—')}</td></tr>
+          <tr><td class="muted">SSIC</td><td>${esc(c.ssic_codes || '—')}</td></tr>
+          <tr><td class="muted">注册资本</td><td>${esc(c.currency || 'SGD')} ${(c.paid_up_capital || 0).toLocaleString()}</td></tr>
+          <tr><td class="muted">订阅</td><td>${esc(c.subscription_tier || 'basic')}</td></tr>
+          <tr><td class="muted">板块</td><td>${esc(c.segment || 'local_sg')}</td></tr>
+          <tr><td class="muted">法人/董事</td><td>${a.persons.length} 人</td></tr>
+          <tr><td class="muted">银行账户</td><td>${a.bank_accounts.length} 个</td></tr>
+          <tr><td class="muted">创建时间</td><td>${esc(c.created_at)}</td></tr>
+        </table>
+      </div>
+      <div>
+        <h4>⚠️ 即将到期 (${upcoming.length})</h4>
+        ${upcoming.length ? upcoming.map(u => `
+          <div class="arc-list-item" style="background:#fef3c7;border-radius:6px;margin-bottom:6px">
+            <div>
+              <div style="font-weight:600">${esc(u.kind)}</div>
+              <div class="muted" style="font-size:12px">到期：${esc(u.due_date)}</div>
+            </div>
+            <span style="color:#92400e;font-size:12px">${esc(u.status)}</span>
+          </div>`).join('') : `<p class="muted">30 天内无到期事项 ✓</p>`}
+
+        <h4 style="margin-top:20px">⏳ 近期活动 (${recentEvents.length})</h4>
+        ${recentEvents.length ? recentEvents.map(e => `
+          <div class="arc-list-item">
+            <span class="arc-ev-icon">${e.icon || '•'}</span>
+            <div style="flex:1">
+              <div style="font-weight:500">${esc(e.title)}</div>
+              <div class="muted" style="font-size:12px">${esc(e.detail || '')}</div>
+            </div>
+            <span class="muted" style="font-size:11px;white-space:nowrap">${esc((e.ts || '').slice(0,16))}</span>
+          </div>`).join('') : `<p class="muted">暂无活动</p>`}
+      </div>
+    </div>`;
+}
+
+function arcRenderBasic(a) {
+  const c = a.company;
+  return `
+    <h4>🏢 公司信息</h4>
+    <table class="arc-tbl">
+      <tr><th>字段</th><th>值</th></tr>
+      ${Object.entries(c).map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(String(v || '—'))}</td></tr>`).join('')}
+    </table>
+
+    <h4 style="margin-top:20px">👥 法人 / 董事 / 股东 (${a.persons.length})</h4>
+    ${a.persons.length ? `<table class="arc-tbl">
+      <thead><tr><th>姓名</th><th>角色</th><th>国籍</th><th>NRIC/Passport</th><th>持股%</th></tr></thead>
+      <tbody>${a.persons.map(p => `<tr><td>${esc(p.name || '-')}</td><td>${esc(p.role || '-')}</td><td>${esc(p.nationality || '-')}</td><td>${esc(p.nric_passport || '-')}</td><td>${p.shareholding_percent || 0}%</td></tr>`).join('')}</tbody>
+    </table>` : `<p class="muted">暂无</p>`}
+
+    <h4 style="margin-top:20px">🏦 银行账户 (${a.bank_accounts.length})</h4>
+    ${a.bank_accounts.length ? `<table class="arc-tbl">
+      <thead><tr><th>银行</th><th>账号</th><th>币种</th><th>余额</th><th>状态</th></tr></thead>
+      <tbody>${a.bank_accounts.map(b => `<tr><td>${esc(b.bank_name || '-')}</td><td><code>${esc(b.account_number || '-')}</code></td><td>${esc(b.currency || 'SGD')}</td><td>${b.balance || 0}</td><td>${esc(b.status || '-')}</td></tr>`).join('')}</tbody>
+    </table>` : `<p class="muted">尚未绑定银行账户</p>`}
+
+    <h4 style="margin-top:20px">🪪 KYC 会话 (${a.kyc.length})</h4>
+    ${a.kyc.length ? `<table class="arc-tbl">
+      <thead><tr><th>ID</th><th>状态</th><th>创建时间</th></tr></thead>
+      <tbody>${a.kyc.map(k => `<tr><td><code>${esc(k.id)}</code></td><td>${esc(k.status)}</td><td>${esc(k.created_at)}</td></tr>`).join('')}</tbody>
+    </table>` : `<p class="muted">尚无 KYC 记录</p>`}
+
+    <h4 style="margin-top:20px">📝 注册订单 (${a.registration_orders.length})</h4>
+    ${a.registration_orders.length ? `<table class="arc-tbl">
+      <thead><tr><th>ID</th><th>阶段</th><th>进度</th><th>价格</th><th>创建</th></tr></thead>
+      <tbody>${a.registration_orders.map(r => `<tr><td><code>${esc(r.id)}</code></td><td>${esc(r.stage)}</td><td>${Math.round((r.progress || 0)*100)}%</td><td>S$${r.price_sgd || 0}</td><td>${esc(r.created_at)}</td></tr>`).join('')}</tbody>
+    </table>` : `<p class="muted">暂无</p>`}
+  `;
+}
+
+function arcRenderExpenses(a) {
+  const s = a.expenses.summary;
+  return `
+    <div class="grid" style="grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px">
+      <div class="card" style="padding:12px"><div class="muted" style="font-size:11px">总收入</div><div style="font-size:20px;font-weight:700;color:#10b981">S$ ${(s.total_income||0).toFixed(2)}</div></div>
+      <div class="card" style="padding:12px"><div class="muted" style="font-size:11px">总支出</div><div style="font-size:20px;font-weight:700;color:#ef4444">S$ ${(s.total_expense||0).toFixed(2)}</div></div>
+      <div class="card" style="padding:12px"><div class="muted" style="font-size:11px">净现金流</div><div style="font-size:20px;font-weight:700;color:${s.net_cashflow >= 0 ? '#10b981' : '#ef4444'}">S$ ${(s.net_cashflow||0).toFixed(2)}</div></div>
+      <div class="card" style="padding:12px"><div class="muted" style="font-size:11px">发票 GST</div><div style="font-size:20px;font-weight:700">S$ ${(s.total_gst||0).toFixed(2)}</div></div>
+    </div>
+
+    <h4>💸 交易流水 (${a.expenses.transactions.length})</h4>
+    ${a.expenses.transactions.length ? `<table class="arc-tbl">
+      <thead><tr><th>日期</th><th>金额</th><th>描述</th><th>对方</th><th>分类</th></tr></thead>
+      <tbody>${a.expenses.transactions.slice(0, 100).map(t => `
+        <tr>
+          <td>${esc(t.transaction_date || '-')}</td>
+          <td style="color:${t.amount >= 0 ? '#10b981' : '#ef4444'};font-weight:600">${t.amount >= 0 ? '+' : ''}${t.currency || 'SGD'} ${(t.amount || 0).toFixed(2)}</td>
+          <td>${esc(t.description || '-')}</td>
+          <td>${esc(t.counterparty || '-')}</td>
+          <td>${esc(t.category || t.reference || '-')}</td>
+        </tr>`).join('')}</tbody>
+    </table>` : `<p class="muted">暂无交易</p>`}
+
+    <h4 style="margin-top:20px">🧾 发票 (${a.expenses.invoices.length})</h4>
+    ${a.expenses.invoices.length ? `<table class="arc-tbl">
+      <thead><tr><th>发票号</th><th>供应商</th><th>日期</th><th>金额</th><th>GST</th><th>状态</th><th>置信度</th></tr></thead>
+      <tbody>${a.expenses.invoices.slice(0,100).map(i => `
+        <tr>
+          <td><code>${esc(i.invoice_number || i.id.slice(-8))}</code></td>
+          <td>${esc(i.vendor_name || '-')}</td>
+          <td>${esc(i.issue_date || '-')}</td>
+          <td>${esc(i.currency || 'SGD')} ${(i.total || 0).toFixed(2)}</td>
+          <td>${(i.gst_amount || 0).toFixed(2)}</td>
+          <td><span style="padding:2px 8px;border-radius:12px;background:${i.status === 'paid' ? '#dcfce7' : '#fef3c7'};font-size:11px">${esc(i.status)}</span></td>
+          <td>${i.ocr_confidence != null ? (i.ocr_confidence * 100).toFixed(0) + '%' : '-'}</td>
+        </tr>`).join('')}</tbody>
+    </table>` : `<p class="muted">暂无发票</p>`}
+  `;
+}
+
+function arcRenderTax(a) {
+  return `
+    <h4>🏛️ 税务申报 (${a.tax.filings.length})</h4>
+    ${a.tax.filings.length ? `<table class="arc-tbl">
+      <thead><tr><th>类型</th><th>期间</th><th>应纳税</th><th>已缴</th><th>状态</th><th>到期</th><th>提交</th></tr></thead>
+      <tbody>${a.tax.filings.map(f => `
+        <tr>
+          <td><b>${esc(f.kind)}</b></td>
+          <td>${esc(f.period || '-')}</td>
+          <td>S$ ${(f.amount_due || 0).toFixed(2)}</td>
+          <td>S$ ${(f.amount_paid || 0).toFixed(2)}</td>
+          <td><span style="padding:2px 8px;border-radius:12px;background:${f.status === 'submitted' ? '#dcfce7' : '#fef3c7'};font-size:11px">${esc(f.status)}</span></td>
+          <td>${esc(f.due_date || '-')}</td>
+          <td>${esc(f.submitted_at || '-')}</td>
+        </tr>`).join('')}</tbody>
+    </table>` : `<p class="muted">尚无税务申报记录（此档案还没有开始报税）</p>`}
+
+    <h4 style="margin-top:20px">⚠️ 即将到期 (${a.tax.upcoming_deadlines.length})</h4>
+    ${a.tax.upcoming_deadlines.length ? a.tax.upcoming_deadlines.map(u => `
+      <div class="arc-list-item" style="background:#fef3c7;border-radius:6px;margin-bottom:6px">
+        <div><b>${esc(u.kind)}</b> · ${esc(u.period || '')}<div class="muted" style="font-size:12px">到期 ${esc(u.due_date)}</div></div>
+        <span>S$ ${(u.amount_due || 0).toFixed(2)}</span>
+      </div>`).join('') : `<p class="muted">30 天内无到期 ✓</p>`}
+
+    <h4 style="margin-top:20px">📒 会计分录 (${a.tax.journals.length})</h4>
+    ${a.tax.journals.length ? `<table class="arc-tbl">
+      <thead><tr><th>日期</th><th>描述</th><th>借方</th><th>贷方</th><th>状态</th></tr></thead>
+      <tbody>${a.tax.journals.slice(0, 50).map(j => `
+        <tr>
+          <td>${esc(j.entry_date || '-')}</td>
+          <td>${esc(j.description || '-')}</td>
+          <td>${(j.debit_amount || 0).toFixed(2)}</td>
+          <td>${(j.credit_amount || 0).toFixed(2)}</td>
+          <td>${esc(j.status || 'posted')}</td>
+        </tr>`).join('')}</tbody>
+    </table>` : `<p class="muted">暂无分录</p>`}
+  `;
+}
+
+function arcRenderReports(a) {
+  const y = a.reports.yearly;
+  const m = a.reports.monthly;
+  return `
+    <h4>📈 年度财报 (${y.length} 年)</h4>
+    ${y.length ? `<table class="arc-tbl">
+      <thead><tr><th>年度</th><th>交易数</th><th>营收</th><th>支出</th><th>净利润</th><th>利润率</th></tr></thead>
+      <tbody>${y.map(r => {
+        const margin = r.revenue > 0 ? ((r.net_profit / r.revenue) * 100).toFixed(1) : '—';
+        return `<tr>
+          <td><b>${esc(r.year)}</b></td>
+          <td>${r.txn_count}</td>
+          <td style="color:#10b981">S$ ${r.revenue.toFixed(2)}</td>
+          <td style="color:#ef4444">S$ ${r.expense.toFixed(2)}</td>
+          <td style="color:${r.net_profit >= 0 ? '#10b981' : '#ef4444'};font-weight:600">S$ ${r.net_profit.toFixed(2)}</td>
+          <td>${margin}${margin !== '—' ? '%' : ''}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>` : `<p class="muted">尚无交易数据，无法生成年度报表</p>`}
+
+    <h4 style="margin-top:20px">📅 月度趋势（近 ${m.length} 个月）</h4>
+    ${m.length ? `<table class="arc-tbl">
+      <thead><tr><th>月份</th><th>交易数</th><th>营收</th><th>支出</th></tr></thead>
+      <tbody>${m.map(r => `<tr>
+        <td>${esc(r.month)}</td><td>${r.txn_count}</td>
+        <td style="color:#10b981">S$ ${r.revenue.toFixed(2)}</td>
+        <td style="color:#ef4444">S$ ${r.expense.toFixed(2)}</td>
+      </tr>`).join('')}</tbody>
+    </table>` : `<p class="muted">暂无数据</p>`}
+
+    <h4 style="margin-top:20px">📄 已生成报表文件 (${a.reports.report_documents.length})</h4>
+    ${a.reports.report_documents.length ? `<table class="arc-tbl">
+      <thead><tr><th>类型</th><th>版本</th><th>生成时间</th><th>AI</th></tr></thead>
+      <tbody>${a.reports.report_documents.map(d => `<tr>
+        <td>${esc(d.kind)}</td><td>v${d.version || 1}</td>
+        <td>${esc(d.created_at)}</td>
+        <td>${d.generated_by_ai ? '🤖' : '👤'}</td>
+      </tr>`).join('')}</tbody>
+    </table>` : `<p class="muted">尚未生成报表文件</p>`}
+  `;
+}
+
+function arcRenderHistory(a) {
+  return `
+    <div class="grid" style="grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px">
+      <div class="card" style="padding:12px;text-align:center"><div class="muted" style="font-size:11px">文档</div><div style="font-size:22px;font-weight:700">${a.history.documents.length}</div></div>
+      <div class="card" style="padding:12px;text-align:center"><div class="muted" style="font-size:11px">WhatsApp 消息</div><div style="font-size:22px;font-weight:700">${a.history.wa_messages.length}</div></div>
+      <div class="card" style="padding:12px;text-align:center"><div class="muted" style="font-size:11px">上传提交</div><div style="font-size:22px;font-weight:700">${a.history.uploads.length}</div></div>
+      <div class="card" style="padding:12px;text-align:center"><div class="muted" style="font-size:11px">AI 执行</div><div style="font-size:22px;font-weight:700">${a.history.agent_runs.length}</div></div>
+    </div>
+
+    <h4>📄 文档记录</h4>
+    ${a.history.documents.length ? `<table class="arc-tbl">
+      <thead><tr><th>类型</th><th>版本</th><th>文件</th><th>AI</th><th>创建</th></tr></thead>
+      <tbody>${a.history.documents.slice(0,30).map(d => `<tr>
+        <td><b>${esc(d.kind || '-')}</b></td><td>v${d.version || 1}</td>
+        <td><code style="font-size:11px">${esc((d.file_path || '').slice(0,40))}</code></td>
+        <td>${d.generated_by_ai ? '🤖' : '👤'}</td>
+        <td>${esc((d.created_at || '').slice(0,16))}</td>
+      </tr>`).join('')}</tbody>
+    </table>` : `<p class="muted">暂无</p>`}
+
+    <h4 style="margin-top:20px">📤 上传记录</h4>
+    ${a.history.uploads.length ? `<table class="arc-tbl">
+      <thead><tr><th>链接</th><th>提交人</th><th>文件数</th><th>分类</th><th>时间</th></tr></thead>
+      <tbody>${a.history.uploads.slice(0,30).map(u => `<tr>
+        <td><code style="font-size:11px">${esc(u.token_code || '-')}</code> ${esc(u.token_label || '')}</td>
+        <td>${esc(u.submitter_name || '匿名')}</td>
+        <td>${u.file_count || 0}</td>
+        <td>${esc(u.classified_as || '-')}</td>
+        <td>${esc((u.created_at || '').slice(0,16))}</td>
+      </tr>`).join('')}</tbody>
+    </table>` : `<p class="muted">暂无上传</p>`}
+
+    <h4 style="margin-top:20px">💬 WhatsApp 消息</h4>
+    ${a.history.wa_messages.length ? `<table class="arc-tbl">
+      <thead><tr><th>方向</th><th>类型</th><th>内容</th><th>分类</th><th>置信度</th><th>时间</th></tr></thead>
+      <tbody>${a.history.wa_messages.slice(0,30).map(m => `<tr>
+        <td>${m.direction === 'in' ? '📥' : '📤'}</td>
+        <td>${esc(m.msg_type || 'text')}</td>
+        <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis">${esc((m.content || '').slice(0,80))}</td>
+        <td>${esc(m.classified_as || '-')}</td>
+        <td>${m.ai_confidence != null ? (m.ai_confidence * 100).toFixed(0) + '%' : '-'}</td>
+        <td>${esc((m.received_at || '').slice(0,16))}</td>
+      </tr>`).join('')}</tbody>
+    </table>` : `<p class="muted">暂无</p>`}
+
+    <h4 style="margin-top:20px">🤖 AI Agent 执行</h4>
+    ${a.history.agent_runs.length ? `<table class="arc-tbl">
+      <thead><tr><th>Agent</th><th>状态</th><th>延迟</th><th>开始</th></tr></thead>
+      <tbody>${a.history.agent_runs.slice(0,30).map(r => `<tr>
+        <td><b>${esc(r.agent_id)}</b></td>
+        <td>${esc(r.status)}</td>
+        <td>${r.latency_ms || '-'} ms</td>
+        <td>${esc((r.started_at || '').slice(0,16))}</td>
+      </tr>`).join('')}</tbody>
+    </table>` : `<p class="muted">暂无</p>`}
+  `;
+}
+
+function arcRenderTimeline(a) {
+  const items = a.timeline || [];
+  if (!items.length) return `<p class="muted">暂无活动</p>`;
+  return `
+    <h4>⏳ 统一时间线 (${items.length} 个事件)</h4>
+    <div style="border-left:2px solid #e2e8f0;padding-left:16px;margin-left:8px">
+      ${items.map(e => `
+        <div style="position:relative;padding:10px 0;border-bottom:1px dashed #f1f5f9">
+          <div style="position:absolute;left:-25px;top:14px;width:14px;height:14px;border-radius:50%;background:#fff;border:2px solid #2563eb"></div>
+          <div style="display:flex;justify-content:space-between;gap:10px">
+            <div>
+              <span style="font-size:18px">${e.icon || '•'}</span>
+              <b style="margin-left:6px">${esc(e.title)}</b>
+              <span class="muted" style="font-size:12px;margin-left:8px">${esc(e.detail || '')}</span>
+            </div>
+            <span class="muted" style="font-size:11px;white-space:nowrap">${esc((e.ts || '').slice(0,19))}</span>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function arcRenderBilling(a) {
+  const b = a.billing;
+  return `
+    <div class="grid" style="grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px">
+      <div class="card" style="padding:12px"><div class="muted" style="font-size:11px">已支付</div><div style="font-size:20px;font-weight:700;color:#10b981">S$ ${(b.summary.paid_sum||0).toFixed(2)}</div></div>
+      <div class="card" style="padding:12px"><div class="muted" style="font-size:11px">待支付</div><div style="font-size:20px;font-weight:700;color:#f59e0b">S$ ${(b.summary.pending_sum||0).toFixed(2)}</div></div>
+      <div class="card" style="padding:12px"><div class="muted" style="font-size:11px">支付记录</div><div style="font-size:20px;font-weight:700">${b.summary.total||0}</div></div>
+    </div>
+
+    <h4>💳 支付记录 (${b.payments.length})</h4>
+    ${b.payments.length ? `<table class="arc-tbl">
+      <thead><tr><th>金额</th><th>币种</th><th>渠道</th><th>状态</th><th>用途</th><th>时间</th></tr></thead>
+      <tbody>${b.payments.map(p => `<tr>
+        <td><b>${(p.amount || 0).toFixed(2)}</b></td>
+        <td>${esc(p.currency || 'SGD')}</td>
+        <td>${esc(p.method || '-')}</td>
+        <td><span style="padding:2px 8px;border-radius:12px;background:${p.status === 'success' || p.status === 'paid' ? '#dcfce7' : '#fef3c7'};font-size:11px">${esc(p.status)}</span></td>
+        <td>${esc(p.purpose || '-')}</td>
+        <td>${esc((p.created_at || '').slice(0,16))}</td>
+      </tr>`).join('')}</tbody>
+    </table>` : `<p class="muted">暂无支付</p>`}
+
+    <h4 style="margin-top:20px">🔔 提醒 (${b.reminders.length})</h4>
+    ${b.reminders.length ? `<table class="arc-tbl">
+      <thead><tr><th>事项</th><th>到期</th><th>状态</th></tr></thead>
+      <tbody>${b.reminders.map(r => `<tr>
+        <td>${esc(r.title || r.kind || '-')}</td>
+        <td>${esc(r.due_at || '-')}</td>
+        <td>${esc(r.status || '-')}</td>
+      </tr>`).join('')}</tbody>
+    </table>` : `<p class="muted">暂无</p>`}
+  `;
+}
+
+window.arcSnapshot = async function (id) {
+  const name = prompt('快照命名：', `档案快照 ${new Date().toISOString().slice(0,10)}`);
+  if (!name) return;
+  try {
+    const r = await fetch(`/api/admin/archive/company/${id}/snapshot`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    const d = await r.json();
+    if (d.ok) gwToast(`✓ 快照已生成 · ${(d.size_bytes/1024).toFixed(1)} KB`, 'ok');
+    else      gwToast('失败: ' + (d.error || r.status), 'err');
+  } catch (e) { gwToast('请求失败: ' + e.message, 'err'); }
+};
+
+window.arcExport = function () {
+  const a = window._currentArchive;
+  if (!a) return;
+  const blob = new Blob([JSON.stringify(a, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `archive-${a.company.id}-${new Date().toISOString().slice(0,10)}.json`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  gwToast('✓ 档案已导出', 'ok');
+};
+
+window.arcNewService = function (id) {
+  const services = [
+    { k: 'upload',      t: '🔗 生成专属上传链接',    fn: () => anav('uploadPortal') },
+    { k: 'tax',         t: '🏛️ 新建税务申报 (ECI/GST)', fn: () => gwToast('→ 请到 Agent Studio 选择 tax_agent', 'info') },
+    { k: 'report',      t: '📈 生成财务报表 (P&L/BS)',  fn: () => gwToast('→ 请到 Agent Studio 选择 audit_agent', 'info') },
+    { k: 'registry',    t: '📝 新的注册申请',           fn: () => gwToast('→ 请到 Review Queue → 新增订单', 'info') },
+    { k: 'snapshot',    t: '📸 生成档案快照',           fn: () => arcSnapshot(id) },
+  ];
+  const m = document.getElementById('upModal') || (() => { const d = document.createElement('div'); d.id = 'arcModal'; document.body.appendChild(d); return d; })();
+  m.innerHTML = `
+    <div style="position:fixed;inset:0;background:rgba(15,23,42,0.5);display:flex;align-items:center;justify-content:center;z-index:9999" onclick="if(event.target===this)this.remove()">
+      <div class="card" style="width:400px">
+        <h3 style="margin-top:0">🚀 基于此档案发起新服务</h3>
+        <p class="muted">以该企业档案为核心，一键发起常用服务流程：</p>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px">
+          ${services.map((s, i) => `<button class="btn" style="text-align:left;justify-content:flex-start" onclick="this.parentElement.parentElement.parentElement.parentElement.remove();window._arcSvc${i}()">${s.t}</button>`).join('')}
+        </div>
+        <div style="text-align:right;margin-top:12px"><button class="btn" onclick="this.parentElement.parentElement.parentElement.remove()">取消</button></div>
+      </div>
+    </div>`;
+  services.forEach((s, i) => { window[`_arcSvc${i}`] = s.fn; });
 };
