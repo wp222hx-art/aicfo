@@ -1523,7 +1523,7 @@ router.post('/admin/llm/config', (req, res) => {
   try {
     const patch = req.body || {};
     // 安全：只允许白名单字段
-    const allow = ['provider', 'base_url', 'api_key', 'enabled', 'models', 'tier_by_purpose'];
+    const allow = ['provider', 'base_url', 'api_key', 'enabled', 'models', 'tier_by_purpose', 'available_models'];
     const cleaned = {};
     for (const k of allow) if (k in patch) cleaned[k] = patch[k];
     const cfg = llmGateway.updateConfig(cleaned);
