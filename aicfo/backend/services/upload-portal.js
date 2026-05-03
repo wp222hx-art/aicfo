@@ -93,10 +93,13 @@ async function submitFiles({ token, files = [], text = '', submitter_name = '', 
   if (!v.ok) return v;
   const tk = v.token;
 
-  // 确保该 user 有个 virtual channel（复用 wa_channels 架构）
-  let ch = db.prepare(`SELECT * FROM wa_channels WHERE user_id=? AND status='active' LIMIT 1`).get(tk.user_id);
+  // 确保该 user 有个 virtual channel 且 company_id 与 token 一致
+  // （关键：不能复用属于其它公司的 wa_channel，否则上传文件会挂到错公司名下）
+  let ch = db.prepare(
+    `SELECT * FROM wa_channels WHERE user_id=? AND company_id=? AND status='active' LIMIT 1`
+  ).get(tk.user_id, tk.company_id);
   if (!ch) {
-    // 创建一个虚拟 channel 作为归属
+    // 为这家公司创建一个虚拟 channel 作为归属
     const cid = 'wac_up_' + uuid().slice(0, 8);
     db.prepare(`
       INSERT INTO wa_channels(id,user_id,company_id,finance_token,qr_payload,bot_phone,status,wa_phone,created_at)

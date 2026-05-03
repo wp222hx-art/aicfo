@@ -1,0 +1,164 @@
+{
+  "ok": 35,
+  "fail": 0,
+  "tests": [
+    {
+      "name": "GET /admin/archive/companies 200",
+      "ok": true
+    },
+    {
+      "name": "返回 ok=true",
+      "ok": true
+    },
+    {
+      "name": "至少返回 1 家公司",
+      "ok": true,
+      "extra": "count=7"
+    },
+    {
+      "name": "列表项含 stats 聚合",
+      "ok": true
+    },
+    {
+      "name": "列表项含 last_activity_at",
+      "ok": true
+    },
+    {
+      "name": "GET /admin/archive/company/:id 200",
+      "ok": true
+    },
+    {
+      "name": "返回 ok=true",
+      "ok": true,
+      "extra": "error=-"
+    },
+    {
+      "name": "含 company",
+      "ok": true
+    },
+    {
+      "name": "含 owner",
+      "ok": true
+    },
+    {
+      "name": "含 expenses.transactions",
+      "ok": true
+    },
+    {
+      "name": "含 expenses.invoices",
+      "ok": true
+    },
+    {
+      "name": "含 expenses.summary",
+      "ok": true
+    },
+    {
+      "name": "含 tax.filings/journals/upcoming",
+      "ok": true
+    },
+    {
+      "name": "含 reports.yearly/monthly",
+      "ok": true
+    },
+    {
+      "name": "含 history.documents/wa_messages/uploads",
+      "ok": true
+    },
+    {
+      "name": "含 billing.payments/reminders",
+      "ok": true
+    },
+    {
+      "name": "含 timeline",
+      "ok": true
+    },
+    {
+      "name": "GET /admin/archive/company/:id/basic → ok",
+      "ok": true,
+      "extra": "error=-"
+    },
+    {
+      "name": "GET /admin/archive/company/:id/expenses → ok",
+      "ok": true,
+      "extra": "error=-"
+    },
+    {
+      "name": "GET /admin/archive/company/:id/tax → ok",
+      "ok": true,
+      "extra": "error=-"
+    },
+    {
+      "name": "GET /admin/archive/company/:id/reports → ok",
+      "ok": true,
+      "extra": "error=-"
+    },
+    {
+      "name": "GET /admin/archive/company/:id/history → ok",
+      "ok": true,
+      "extra": "error=-"
+    },
+    {
+      "name": "GET /admin/archive/company/:id/billing → ok",
+      "ok": true,
+      "extra": "error=-"
+    },
+    {
+      "name": "GET /admin/archive/company/:id/timeline → ok",
+      "ok": true,
+      "extra": "error=-"
+    },
+    {
+      "name": "POST /admin/archive/company/:id/snapshot 200",
+      "ok": true
+    },
+    {
+      "name": "快照 ok=true",
+      "ok": true,
+      "extra": "doc_id=-"
+    },
+    {
+      "name": "生成 token 200",
+      "ok": true,
+      "extra": "token=UP-F6A5C6634A"
+    },
+    {
+      "name": "token 锁定 company_id",
+      "ok": true,
+      "extra": "company_id=co_skyhawk_001"
+    },
+    {
+      "name": "上传图片 200",
+      "ok": true
+    },
+    {
+      "name": "上传 ok=true",
+      "ok": true,
+      "extra": "cls=invoice"
+    },
+    {
+      "name": "返回 linked_entity_ids",
+      "ok": true
+    },
+    {
+      "name": "档案中至少 1 张发票带 image_url",
+      "ok": true,
+      "extra": "count=1"
+    },
+    {
+      "name": "image_url 文件可下载 (200)",
+      "ok": true
+    },
+    {
+      "name": "下载的文件内容 = 原 PNG",
+      "ok": true,
+      "extra": "size=70"
+    },
+    {
+      "name": "history.wa_messages 有带文件路径的消息",
+      "ok": true,
+      "extra": "count=1"
+    }
+  ],
+  "base": "http://localhost:3000",
+  "timestamp": "2026-05-03T14:48:20.151Z"
+}
