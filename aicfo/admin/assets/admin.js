@@ -986,15 +986,29 @@ async function waChannels() {
 async function llmGateway() {
   const app = document.getElementById('av');
   if (!app) { console.error('[llmGateway] #av container not found'); return; }
-  app.innerHTML = `<div class="card"><h3>⚡ 模型网关 (Tokenhot.ai)</h3><p class="muted">加载中…</p></div>`;
+  app.innerHTML = `<div class="card"><h3>⚡ 模型网关 (Tokenhot.ai)</h3>
+    <p class="muted">⏳ 加载中 · 正在并发检测账号下可用模型与三个 tier 连通状态…</p>
+    <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+      <span class="badge">读取配置</span><span class="badge">/v1/models 发现</span><span class="badge">三 tier 自动探测</span>
+    </div></div>`;
 
+  // 并发：配置 + 日志 + 发现可用模型 + 三 tier 自动探测（进入页面自动检测）
   let cfg = {};
   let logsResp = { stats: {}, logs: [] };
+  let discover = { ok: false, models: [] };
+  let probe    = { ok: false, results: [] };
   try {
-    const r1 = await api('/admin/llm/config');
-    cfg = r1.config || {};
-    const r2 = await api('/admin/llm/logs?limit=30');
-    logsResp = r2 || logsResp;
+    const [r1, r2, r3, r4] = await Promise.allSettled([
+      api('/admin/llm/config'),
+      api('/admin/llm/logs?limit=30'),
+      api('/admin/llm/models/discover'),
+      api('/admin/llm/probe', { method: 'POST' })
+    ]);
+    if (r1.status === 'fulfilled') cfg      = r1.value.config || {};
+    if (r2.status === 'fulfilled') logsResp = r2.value || logsResp;
+    if (r3.status === 'fulfilled') discover = r3.value || discover;
+    if (r4.status === 'fulfilled') probe    = r4.value || probe;
+    if (r1.status !== 'fulfilled') throw r1.reason || new Error('config failed');
   } catch (e) {
     app.innerHTML = `<div class="card"><h3>⚡ 模型网关</h3><p style="color:#ef4444">加载失败：${esc(e.message)}</p></div>`;
     return;
@@ -1006,10 +1020,24 @@ async function llmGateway() {
   const avail  = cfg.available_models || { reasoning: [], fast: [], default: [] };
   const tierMap = cfg.tier_by_purpose || {};
 
+  // 账号下真实可用的模型（由 /admin/llm/models/discover 返回）
+  const liveModels = Array.isArray(discover.models) ? discover.models : [];
+  const liveSet    = new Set(liveModels);
+
+  // 三 tier 自动探测结果 (由 /admin/llm/probe 返回)
+  const probeMap = {};
+  (probe.results || []).forEach(r => { probeMap[r.tier] = r; });
+
   function modelSelect(tier, selected) {
-    const opts = (avail[tier] || []).map(m =>
-      `<option value="${esc(m)}" ${m === selected ? 'selected' : ''}>${esc(m)}</option>`
-    ).join('');
+    // 若发现到真实模型列表，则合并 (白名单 ∪ 实际可用)；否则退回到配置里的白名单
+    const combined = liveModels.length
+      ? Array.from(new Set([...(avail[tier] || []), ...liveModels])).sort()
+      : (avail[tier] || []);
+    const opts = combined.map(m => {
+      const live = liveSet.has(m) ? ' · ✓' : ' · ⚠︎';
+      const tag  = liveModels.length ? live : '';
+      return `<option value="${esc(m)}" ${m === selected ? 'selected' : ''}>${esc(m)}${tag}</option>`;
+    }).join('');
     return `<select id="model_${tier}" class="input" style="min-width:240px">${opts}</select>`;
   }
 
@@ -1040,8 +1068,64 @@ async function llmGateway() {
           : `<span style="color:#ef4444" title="${esc(l.error||'')}">✗ err</span>`}</td>
     </tr>`).join('') || '<tr><td colspan="7" class="empty">暂无调用日志</td></tr>';
 
+
+  // 🔍 自动检测看板：发现 + 三 tier 连通状态
+  const probeCards = ['reasoning','fast','default'].map(tier => {
+    const r = probeMap[tier] || { ok:false, skipped:true, model: models[tier] };
+    const color = r.skipped ? '#94a3b8' : (r.ok ? '#10b981' : '#ef4444');
+    const bg    = r.skipped ? '#f8fafc' : (r.ok ? '#ecfdf5' : '#fef2f2');
+    const label = r.skipped ? '⚪ 跳过' : (r.ok ? '🟢 可用' : '🔴 失败');
+    const sub   = r.skipped ? (r.reason || 'gateway 未就绪')
+                : r.ok ? `${r.latency_ms||0} ms · reply=${esc((r.reply||'').slice(0,24))}`
+                       : esc((r.error || 'error').slice(0,80));
+    return `<div class="kv" style="background:${bg};border-left:4px solid ${color};padding:12px;border-radius:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+        <b style="color:${color}">${label}</b>
+        <span class="badge" style="background:#fff;border:1px solid #e5e7eb">${esc(tier)}</span>
+      </div>
+      <div style="font-family:monospace;font-size:12px;color:#0f172a;margin-bottom:2px">${esc(r.model || '-')}</div>
+      <div class="muted" style="font-size:11px">${sub}</div>
+    </div>`;
+  }).join('');
+
+  const discoverBadge = discover.ok
+    ? `<span style="color:#10b981">🟢 已发现 <b>${discover.count || liveModels.length}</b> 个真实可用模型</span>
+       · <span class="muted" style="font-size:11px">latency ${discover.latency_ms||0} ms</span>`
+    : (discover.ready === false
+       ? `<span style="color:#94a3b8">⚪ 未配置 API Key，跳过发现</span>`
+       : `<span style="color:#ef4444">🔴 发现失败</span>
+          <span class="muted" style="font-size:11px">· ${esc((discover.error||'unknown').slice(0,80))}</span>`);
+
+  const top20 = liveModels.slice(0, 20).map(m =>
+    `<code style="background:#f1f5f9;border:1px solid #e2e8f0;padding:2px 6px;border-radius:4px;font-size:11px;margin:2px;display:inline-block">${esc(m)}</code>`
+  ).join('');
+
   app.innerHTML = `
-    <div class="card">
+    <!-- 🔍 自动检测看板（进入页面自动触发） -->
+    <div class="card" style="border:2px solid #0ea5e9;background:linear-gradient(180deg,#f0f9ff 0%,#fff 40%)">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+        <h3 style="margin:0">🔍 自动检测结果 <span class="muted" style="font-size:12px;font-weight:normal">(每次进入页面自动跑)</span></h3>
+        <button class="btn btn-sm" onclick="anav('llmGateway')">🔄 重新检测</button>
+      </div>
+
+      <div style="margin:10px 0 14px">${discoverBadge}</div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-bottom:14px">
+        ${probeCards}
+      </div>
+
+      ${liveModels.length ? `
+      <details style="margin-top:8px">
+        <summary style="cursor:pointer;color:#0284c7;font-size:13px">
+          📋 展开账号全部 ${liveModels.length} 个可用模型
+        </summary>
+        <div style="padding:10px 0 4px;line-height:1.9">${top20}
+          ${liveModels.length > 20 ? `<span class="muted" style="font-size:11px"> … 及其他 ${liveModels.length - 20} 个</span>` : ''}
+        </div>
+      </details>` : ''}
+    </div>
+
+    <div class="card mt-20">
       <h3>⚡ 模型网关 (Tokenhot.ai 统一 API)</h3>
       <p class="muted">
         一个 API Key 即可调用 100+ 模型（GPT-5.2 / Claude Opus 4.6 / Gemini 3 Pro / DeepSeek V3.2 …）。

@@ -1550,6 +1550,26 @@ router.get('/admin/llm/logs', (req, res) => {
   res.json({ ok: true, stats: llmGateway.stats(), logs: llmGateway.recentLogs(limit) });
 });
 
+// 发现账号下真实可用模型（调 Tokenhot /v1/models）
+router.get('/admin/llm/models/discover', async (req, res) => {
+  try {
+    const r = await llmGateway.listAvailableModels();
+    res.json(r);
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// 并发探测三个 tier 的实际连通状态（进入页面自动触发）
+router.post('/admin/llm/probe', async (req, res) => {
+  try {
+    const r = await llmGateway.probeAllTiers();
+    res.json(r);
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // ================================================================================
 // Singapore Registry (ACRA/BizFile/MyInfo/IRAS) 管理 API
 // ================================================================================

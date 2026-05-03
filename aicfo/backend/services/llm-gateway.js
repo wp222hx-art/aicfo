@@ -310,6 +310,84 @@ async function testConnection({ tier = 'fast' } = {}) {
 // --------------------------------------------------------------------------------
 // 7. 最近调用日志（后台看板用）
 // --------------------------------------------------------------------------------
+// 6.5 发现账号下真实可用的模型 (GET /v1/models)
+// --------------------------------------------------------------------------------
+async function listAvailableModels() {
+  const t0 = Date.now();
+  const c = getConfig();
+  if (!isReady()) {
+    return {
+      ok: false, ready: false,
+      latency_ms: Date.now() - t0,
+      error: 'LLM 网关未就绪 (缺少 API Key 或已停用)',
+      provider: c.provider, base_url: c.base_url,
+      models: []
+    };
+  }
+  const client = getClient();
+  try {
+    const resp = await client.models.list();
+    const data = resp?.data || resp?.body?.data || [];
+    const names = data.map(m => m.id || m.name).filter(Boolean).sort();
+    return {
+      ok: true, ready: true,
+      latency_ms: Date.now() - t0,
+      provider: c.provider, base_url: c.base_url,
+      count: names.length, models: names
+    };
+  } catch (e) {
+    return {
+      ok: false, ready: true,
+      latency_ms: Date.now() - t0,
+      error: e.message,
+      provider: c.provider, base_url: c.base_url,
+      models: []
+    };
+  }
+}
+
+// --------------------------------------------------------------------------------
+// 6.6 并发探测三个 tier 的连通状态（进入页面自动调用）
+// --------------------------------------------------------------------------------
+async function probeAllTiers() {
+  const c = getConfig();
+  const tiers = ['reasoning', 'fast', 'default'];
+  if (!isReady()) {
+    return {
+      ok: false, ready: false,
+      error: 'LLM 网关未就绪 (缺少 API Key 或已停用)',
+      provider: c.provider,
+      results: tiers.map(t => ({
+        tier: t, model: c.models[t] || null,
+        ok: false, skipped: true, reason: 'gateway_not_ready'
+      }))
+    };
+  }
+  const results = await Promise.all(tiers.map(async (tier) => {
+    const t0 = Date.now();
+    try {
+      const r = await testConnection({ tier });
+      return {
+        tier, model: r.model || c.models[tier],
+        ok: !!r.ok,
+        latency_ms: r.latency_ms ?? (Date.now() - t0),
+        reply: r.reply || '',
+        error: r.error || null
+      };
+    } catch (e) {
+      return { tier, model: c.models[tier], ok: false,
+               latency_ms: Date.now() - t0, error: e.message };
+    }
+  }));
+  const okCount = results.filter(r => r.ok).length;
+  return {
+    ok: okCount > 0, ready: true,
+    provider: c.provider,
+    ok_count: okCount, total: tiers.length, results
+  };
+}
+
+// --------------------------------------------------------------------------------
 function recentLogs(limit = 30) {
   if (!db) return [];
   try {
@@ -339,6 +417,7 @@ module.exports = {
   getConfig: () => getMaskedConfig(),
   updateConfig,
   chat, testConnection,
+  listAvailableModels, probeAllTiers,
   logCall, recentLogs, stats,
   _raw: getConfig   // internal use only (llm-real 等要真 api_key 才能构造 client)
 };
