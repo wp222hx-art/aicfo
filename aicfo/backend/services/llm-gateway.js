@@ -36,25 +36,31 @@ const DEFAULT_CONFIG = {
   provider: 'tokenhot',                    // tokenhot | openai | genspark-proxy | custom
   base_url: 'https://api.tokenhot.ai/v1',  // Tokenhot 官方推荐地址
   api_key: '',                             // 由后台配置
-  // tier → 模型映射（用户在后台可改）
+  // tier → 模型映射（基于 Tokenhot 账号实际可用的 83 个模型，用户在后台可改）
   models: {
-    reasoning: 'claude-opus-4-6-thinking', // 最强推理：Opus Thinking / GPT-5.2 High / Gemini 3 Pro
-    fast:      'claude-haiku-4-5',         // 快速分析：Haiku / Gemini 3 Flash / GPT-5.4 Nano
-    default:   'gpt-5-1'                   // 日常核心：GPT-5.1 / Sonnet 4.6 / DeepSeek V3.2
+    reasoning: 'claude-opus-4.7',   // 最强推理
+    fast:      'claude-haiku-4.5',  // 快速分析
+    default:   'gpt-5.4'            // 日常核心
   },
-  // 可选模型库（下拉框来源）
+  // 可选模型库（Tokenhot 实测可用）
   available_models: {
     reasoning: [
-      'gemini-3-pro', 'claude-opus-4-6-thinking', 'grok-4-1-thinking',
-      'gpt-5-2-high', 'o3', 'claude-opus-4-6'
+      'claude-opus-4.7', 'claude-opus-4.6',
+      'gemini-3.1-pro-preview', 'grok-4.2-thinking',
+      'DeepSeek-V3.2-Thinking', 'kimi-k2.5-thinking',
+      'gpt-5.5', 'gpt-5.3-codex'
     ],
     fast: [
-      'gemini-3-flash', 'claude-haiku-4-5', 'gpt-5-4-nano',
-      'gpt-5-4', 'gemini-1-5-flash'
+      'claude-haiku-4.5', 'gpt-5.4-mini',
+      'gemini-3.1-flash-lite-preview',
+      'qwen3.6-flash', 'DeepSeek-V3.2-Fast',
+      'MiniMax-M2.7-highspeed', 'deepseek-v4-flash'
     ],
     default: [
-      'gpt-5-1', 'claude-sonnet-4-6', 'deepseek-v3-2',
-      'qwen-max', 'gpt-5-mini'
+      'gpt-5.4', 'claude-sonnet-4.6',
+      'DeepSeek-V3.2', 'deepseek-v4-pro',
+      'qwen3.6-plus', 'glm-5.1',
+      'kimi-k2.6', 'MiniMax-M2.7'
     ]
   },
   // 模块默认 tier（被单次调用的 tier 参数覆盖）
