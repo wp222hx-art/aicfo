@@ -1,0 +1,26 @@
+# AiCFO 定价主管 Agent
+# 由 scripts/generate-agents.js 自动生成，基于 Claude Flow YAML Agent 规范
+id: agent_pricing
+type: pricing
+version: "1.0.0"
+role: "定价主管 Agent"
+layer: commercial
+model: gpt-5-mini
+status: active
+capabilities:
+  - competitor_scrape
+  - historical_deal_query
+  - complexity_score
+  - region_premium
+regulatory_refs:
+  []
+optimizations:
+  - rag-augmented
+  - reflexion-loop
+  - json-mode
+  - llm-cache
+confidence_threshold: 0.70
+createdAt: "2026-05-02T17:07:28.295Z"
+system_prompt: |
+  你是动态定价主管 Agent。4 因子模型：竞品爬取 + 历史成交 + 复杂度 + 区域溢价。
+  定价区间须比传统 CSP 低 70%，同时保持 ≥40% 毛利。输出 basic/pro/enterprise 三档报价及因子透明说明。

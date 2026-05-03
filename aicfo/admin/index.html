@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AiCFO Admin Console</title>
+<link rel="stylesheet" href="/admin/styles/app.css" />
+<style>
+  .sidebar { width: 220px; background: #0f172a; color: #e2e8f0; height: 100vh; position: fixed; top: 0; left: 0; padding: 20px 12px; display: flex; flex-direction: column; gap: 4px; }
+  .sidebar .brand-logo { font-weight: 700; font-size: 16px; color: white; padding: 6px 10px 16px; border-bottom: 1px solid #1e293b; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+  .sidebar .brand-logo .dot { width: 8px; height: 8px; border-radius: 50%; background: #10b981; }
+  .sidebar a { color: #94a3b8; padding: 8px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 10px; }
+  .sidebar a:hover { background: #1e293b; color: white; }
+  .sidebar a.active { background: #0ea5e9; color: white; }
+  .sidebar .group-title { font-size: 10px; text-transform: uppercase; letter-spacing: .1em; color: #64748b; padding: 16px 12px 6px; }
+  .sidebar .lang-btn { background: #1e293b; color: #e2e8f0; border: 1px solid #334155; padding: 8px 12px; border-radius: 8px; font-size: 12px; cursor: pointer; margin-top: 10px; display: flex; align-items: center; justify-content: center; gap: 6px; font-family: inherit; }
+  .sidebar .lang-btn:hover { background: #334155; }
+  .admin-main { margin-left: 220px; padding: 24px 28px; min-height: 100vh; background: var(--bg); }
+  .code-editor { font-family: "SF Mono", Consolas, Monaco, monospace; font-size: 12px; background: #0f172a; color: #e2e8f0; border-radius: 8px; padding: 14px; min-height: 300px; border: 1px solid #1e293b; width: 100%; }
+  .json-box { background: #0f172a; color: #86efac; padding: 14px; border-radius: 8px; font-family: "SF Mono", Consolas, monospace; font-size: 12px; overflow: auto; max-height: 400px; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<aside class="sidebar">
+  <div class="brand-logo"><span class="dot"></span><span data-i18n="admin.brand">AiCFO Admin</span></div>
+
+  <div class="group-title" data-i18n="admin.group.overview">Overview</div>
+  <a data-route="overview" onclick="anav('overview')" data-i18n="admin.nav.overview">📊 Dashboard</a>
+  <a data-route="queue" onclick="anav('queue')" data-i18n="admin.nav.queue">📋 Review Queue</a>
+
+  <div class="group-title" data-i18n="admin.group.agents">Agents</div>
+  <a data-route="agents" onclick="anav('agents')" data-i18n="admin.nav.agents">🤖 Agent Studio</a>
+  <a data-route="runs" onclick="anav('runs')" data-i18n="admin.nav.runs">🔍 Agent Runs</a>
+  <a data-route="playground" onclick="anav('playground')" data-i18n="admin.nav.playground">🎮 Playground</a>
+
+  <div class="group-title" data-i18n="admin.group.rag">RAG Knowledge</div>
+  <a data-route="rag" onclick="anav('rag')" data-i18n="admin.nav.rag">📚 Knowledge Base</a>
+  <a data-route="training" onclick="anav('training')" data-i18n="admin.nav.training">🎓 Training Jobs</a>
+  <a data-route="retrieval" onclick="anav('retrieval')" data-i18n="admin.nav.retrieval">🔎 Retrieval Test</a>
+
+  <div class="group-title" data-i18n="admin.group.ops">Operations</div>
+  <a data-route="companyArchive" onclick="anav('companyArchive')" style="background:linear-gradient(90deg,#dbeafe,transparent);font-weight:600">📚 企业档案库 (Archive)</a>
+  <a data-route="companies" onclick="anav('companies')" data-i18n="admin.nav.companies">🏢 Companies</a>
+  <a data-route="users" onclick="anav('users')" data-i18n="admin.nav.users">👤 Users</a>
+  <a data-route="archives" onclick="anav('archives')">📁 用户财务档案</a>
+  <a data-route="waChannels" onclick="anav('waChannels')">📱 WhatsApp 渠道</a>
+
+  <div class="group-title">System</div>
+  <a data-route="llmGateway" onclick="anav('llmGateway')">⚡ 模型网关 (Tokenhot)</a>
+  <a data-route="waConfig" onclick="anav('waConfig')">💬 WhatsApp Cloud API</a>
+  <a data-route="uploadPortal" onclick="anav('uploadPortal')">🔗 上传链接 (Upload Portal)</a>
+  <a data-route="tgConfig" onclick="anav('tgConfig')">✈️ Telegram Bot</a>
+
+  <div style="flex:1"></div>
+  <button class="lang-btn" onclick="I18N.toggleLocale()" title="Switch language / 切换语言">
+    <span>🌐</span> <span data-i18n="lang.toggle">中文</span>
+  </button>
+  <a href="/" style="color:#64748b;font-size:12px;margin-top:8px" data-i18n="nav.back_customer">← Back to Customer App</a>
+</aside>
+<main class="admin-main" id="av"></main>
+<script src="/admin/assets/i18n.js"></script>
+<script src="/admin/assets/admin.js"></script>
+</body>
+</html>

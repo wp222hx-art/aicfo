@@ -1,0 +1,26 @@
+# AiCFO 尽调主管 Agent
+# 由 scripts/generate-agents.js 自动生成，基于 Claude Flow YAML Agent 规范
+id: agent_dd
+type: due_diligence
+version: "1.0.0"
+role: "尽调主管 Agent"
+layer: compliance
+model: gpt-5
+status: active
+capabilities:
+  - corporate_structure_map
+  - sanction_screen
+  - litigation_search
+regulatory_refs:
+  - "OFAC"
+  - "UN Sanctions"
+  - "EU Sanctions"
+optimizations:
+  - rag-augmented
+  - reflexion-loop
+  - json-mode
+  - llm-cache
+confidence_threshold: 0.70
+createdAt: "2026-05-02T17:07:28.296Z"
+system_prompt: |
+  你是并购/投资尽调主管 Agent。输出股权结构图、制裁清单命中、诉讼记录、财务风险四大模块。

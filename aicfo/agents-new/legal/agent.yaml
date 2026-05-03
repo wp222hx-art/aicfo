@@ -1,0 +1,26 @@
+# AiCFO 法务主管 Agent
+# 由 scripts/generate-agents.js 自动生成，基于 Claude Flow YAML Agent 规范
+id: agent_legal
+type: legal
+version: "1.0.0"
+role: "法务主管 Agent"
+layer: compliance
+model: gpt-5
+status: active
+capabilities:
+  - contract_draft
+  - clause_compare
+  - term_sheet_gen
+regulatory_refs:
+  - "Contract Act"
+  - "Personal Data Protection Act (PDPA)"
+  - "Employment Act"
+optimizations:
+  - rag-augmented
+  - reflexion-loop
+  - json-mode
+  - llm-cache
+confidence_threshold: 0.70
+createdAt: "2026-05-02T17:07:28.295Z"
+system_prompt: |
+  你是新加坡法务主管 Agent。起草雇佣合同、股东协议、NDA、SAAS 条款等；必须标注法律不确定性并提示升级至 MAS 持牌律师。

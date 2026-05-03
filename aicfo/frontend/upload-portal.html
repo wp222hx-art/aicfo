@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <title>AiCFO · 上传账单</title>
+  <style>
+    :root {
+      --brand: #2563eb;
+      --brand-dark: #1e40af;
+      --ok: #10b981;
+      --err: #ef4444;
+      --warn: #f59e0b;
+      --bg: #f6f8fb;
+      --card: #fff;
+      --text: #0f172a;
+      --muted: #64748b;
+      --border: #e2e8f0;
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, "PingFang SC", "Microsoft YaHei", Roboto, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      font-size: 15px;
+      line-height: 1.5;
+    }
+    .wrap { max-width: 560px; margin: 0 auto; padding: 16px; }
+    .hdr {
+      background: linear-gradient(135deg, var(--brand), var(--brand-dark));
+      color: #fff; border-radius: 18px; padding: 22px 18px;
+      box-shadow: 0 8px 24px rgba(37,99,235,0.25);
+      margin-bottom: 16px;
+    }
+    .hdr .logo { font-size: 26px; font-weight: 700; margin-bottom: 6px; }
+    .hdr .sub  { opacity: 0.9; font-size: 14px; }
+    .hdr .meta { margin-top: 14px; font-size: 13px; background: rgba(255,255,255,0.14); padding: 8px 12px; border-radius: 10px; }
+    .hdr .meta .row { display: flex; justify-content: space-between; margin: 2px 0; }
+
+    .card {
+      background: var(--card); border-radius: 14px; padding: 16px;
+      box-shadow: 0 2px 8px rgba(15,23,42,0.06);
+      margin-bottom: 14px;
+    }
+    .card h3 { margin: 0 0 10px; font-size: 16px; }
+
+    .drop {
+      border: 2px dashed #cbd5e1; border-radius: 12px;
+      padding: 28px 14px; text-align: center;
+      transition: all .2s;
+      cursor: pointer;
+      background: #fafbfd;
+    }
+    .drop.over { border-color: var(--brand); background: #eff6ff; }
+    .drop .icon { font-size: 42px; line-height: 1; margin-bottom: 8px; }
+    .drop .big { font-weight: 600; margin-bottom: 4px; }
+    .drop .small { color: var(--muted); font-size: 13px; }
+
+    .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+    .btn {
+      display: flex; align-items: center; justify-content: center; gap: 6px;
+      background: #fff; border: 1.5px solid var(--border); border-radius: 10px;
+      padding: 12px; font-size: 14px; font-weight: 500;
+      cursor: pointer; transition: all .15s;
+    }
+    .btn:hover { border-color: var(--brand); color: var(--brand); }
+    .btn.primary {
+      background: var(--brand); color: #fff; border-color: var(--brand);
+    }
+    .btn.primary:hover { background: var(--brand-dark); color: #fff; }
+    .btn:disabled { opacity: 0.55; cursor: not-allowed; }
+    .btn.block { width: 100%; grid-column: span 2; padding: 14px; font-size: 15px; }
+
+    input[type=file] { display: none; }
+    input, textarea {
+      width: 100%; border: 1px solid var(--border); border-radius: 10px;
+      padding: 10px 12px; font-size: 14px; font-family: inherit;
+      margin-top: 4px;
+    }
+    input:focus, textarea:focus { outline: none; border-color: var(--brand); }
+    label.lbl { font-size: 13px; color: var(--muted); display: block; margin-top: 10px; }
+    textarea { resize: vertical; min-height: 70px; }
+
+    .file-list { margin-top: 12px; }
+    .file-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px;
+      margin-bottom: 8px; background: #fafbfd;
+    }
+    .file-item .thumb {
+      width: 42px; height: 42px; border-radius: 8px; background: #eef2f7;
+      display: flex; align-items: center; justify-content: center; overflow: hidden;
+      font-size: 18px; color: var(--muted);
+      flex-shrink: 0;
+    }
+    .file-item .thumb img { width: 100%; height: 100%; object-fit: cover; }
+    .file-item .info { flex: 1; min-width: 0; }
+    .file-item .name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .file-item .size { font-size: 11px; color: var(--muted); }
+    .file-item .rm { color: var(--err); font-size: 18px; padding: 4px 8px; cursor: pointer; background: none; border: none; }
+
+    .status { padding: 14px; border-radius: 12px; margin-top: 10px; text-align: center; font-size: 14px; }
+    .status.ok  { background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
+    .status.err { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+    .status.loading { background: #eff6ff; color: var(--brand-dark); border: 1px solid #bfdbfe; }
+    .status .emoji { font-size: 22px; display: block; margin-bottom: 4px; }
+    .status .detail { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+    .footer { text-align: center; color: var(--muted); font-size: 11px; padding: 20px 8px; }
+    .footer a { color: var(--brand); text-decoration: none; }
+
+    .badge {
+      display: inline-block; background: rgba(255,255,255,0.18);
+      padding: 2px 8px; border-radius: 20px;
+      font-size: 11px; letter-spacing: 0.5px;
+    }
+    .hide { display: none !important; }
+
+    /* animation */
+    @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .5 } }
+    .pulsing { animation: pulse 1.3s ease-in-out infinite; }
+    @keyframes slideUp {
+      from { transform: translateY(10px); opacity: 0; }
+      to   { transform: translateY(0); opacity: 1; }
+    }
+    .card, .status { animation: slideUp .25s ease-out; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="hdr">
+      <div class="logo">💼 AiCFO</div>
+      <div class="sub">AI 自动识别 · 自动记账 · 新加坡 SFRS / GST 合规</div>
+      <div class="meta" id="metaBox">
+        <div class="row"><span>上传到</span><span id="metaCompany" class="badge">加载中…</span></div>
+        <div class="row"><span>链接</span><span id="metaLabel">—</span></div>
+        <div class="row"><span>已使用</span><span id="metaUsage">0 / ∞</span></div>
+      </div>
+    </div>
+
+    <div id="mainBox">
+      <div class="card">
+        <h3>📸 上传发票/账单/银行流水</h3>
+
+        <label for="filePick" class="drop" id="drop">
+          <div class="icon">📁</div>
+          <div class="big">点击或拖入文件</div>
+          <div class="small">支持 JPG / PNG / PDF / CSV / XLSX · 最大 20MB/文件 · 最多 10 个</div>
+        </label>
+        <input type="file" id="filePick" multiple accept="image/*,application/pdf,.csv,.xlsx,.xls">
+
+        <div class="btn-row">
+          <label class="btn" for="cameraPick">📷 拍照</label>
+          <input type="file" id="cameraPick" accept="image/*" capture="environment">
+          <label class="btn" for="filePick">🖼️ 相册</label>
+        </div>
+
+        <div class="file-list" id="fileList"></div>
+
+        <label class="lbl" for="noteInput">备注（可选）</label>
+        <textarea id="noteInput" placeholder="例如：2025-05 差旅报销、客户应收款、海外供应商付款…"></textarea>
+
+        <label class="lbl" for="nameInput">您是（可选）</label>
+        <input id="nameInput" placeholder="姓名 / 部门，如 张三 / 采购部">
+
+        <button class="btn primary block" id="submitBtn" style="margin-top: 14px;">
+          🚀 提交到 AiCFO
+        </button>
+      </div>
+
+      <div id="statusBox"></div>
+    </div>
+
+    <div id="errorBox" class="hide">
+      <div class="card">
+        <div class="status err">
+          <span class="emoji">🚫</span>
+          <div id="errorMsg">链接无效或已过期</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer">
+      Powered by <a href="/">AiCFO</a> · 数据加密传输 · SFRS / GST 合规
+    </div>
+  </div>
+
+<script>
+(function () {
+  const TOKEN = location.pathname.split('/')[2] || '';
+  const API = '/api';
+
+  const el  = (id) => document.getElementById(id);
+  const metaBox      = el('metaBox');
+  const metaCompany  = el('metaCompany');
+  const metaLabel    = el('metaLabel');
+  const metaUsage    = el('metaUsage');
+  const mainBox      = el('mainBox');
+  const errorBox     = el('errorBox');
+  const errorMsg     = el('errorMsg');
+  const drop         = el('drop');
+  const filePick     = el('filePick');
+  const cameraPick   = el('cameraPick');
+  const fileList     = el('fileList');
+  const submitBtn    = el('submitBtn');
+  const statusBox    = el('statusBox');
+
+  let files = [];
+
+  // ---- 1. 加载元数据 ----
+  fetch(`${API}/upload-portal/public/${TOKEN}`)
+    .then(r => r.json())
+    .then(d => {
+      if (!d || !d.ok) {
+        mainBox.classList.add('hide');
+        errorBox.classList.remove('hide');
+        errorMsg.textContent = d?.error || '链接无效或已过期';
+        return;
+      }
+      metaCompany.textContent = d.company_name || 'AiCFO';
+      metaLabel.textContent   = d.label || '上传链接';
+      const max = d.max_uploads > 0 ? d.max_uploads : '∞';
+      metaUsage.textContent   = `${d.uploads_count || 0} / ${max}`;
+    })
+    .catch(e => {
+      mainBox.classList.add('hide');
+      errorBox.classList.remove('hide');
+      errorMsg.textContent = '网络异常：' + e.message;
+    });
+
+  // ---- 2. 文件拖拽 + 选择 ----
+  ['dragenter','dragover'].forEach(ev => drop.addEventListener(ev, (e) => {
+    e.preventDefault(); drop.classList.add('over');
+  }));
+  ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, (e) => {
+    e.preventDefault(); drop.classList.remove('over');
+  }));
+  drop.addEventListener('drop', (e) => addFiles(e.dataTransfer.files));
+  filePick.addEventListener('change', (e) => addFiles(e.target.files));
+  cameraPick.addEventListener('change', (e) => addFiles(e.target.files));
+
+  // 粘贴截图（桌面）
+  window.addEventListener('paste', (e) => {
+    const items = (e.clipboardData || {}).items || [];
+    const pasted = [];
+    for (const it of items) {
+      if (it.kind === 'file') {
+        const f = it.getAsFile();
+        if (f) pasted.push(f);
+      }
+    }
+    if (pasted.length) addFiles(pasted);
+  });
+
+  function addFiles(list) {
+    for (const f of list) {
+      if (files.length >= 10) break;
+      if (f.size > 20 * 1024 * 1024) { alert(`文件超过 20MB：${f.name}`); continue; }
+      files.push(f);
+    }
+    renderList();
+  }
+
+  function renderList() {
+    fileList.innerHTML = '';
+    files.forEach((f, i) => {
+      const item = document.createElement('div'); item.className = 'file-item';
+      const thumb = document.createElement('div'); thumb.className = 'thumb';
+      if (f.type.startsWith('image/')) {
+        const img = document.createElement('img');
+        img.src = URL.createObjectURL(f);
+        thumb.appendChild(img);
+      } else {
+        thumb.textContent = f.type.includes('pdf') ? '📄' : (f.name.match(/\.(csv|xlsx|xls)$/i) ? '📊' : '📎');
+      }
+      const info = document.createElement('div'); info.className = 'info';
+      info.innerHTML = `<div class="name">${escapeHtml(f.name)}</div><div class="size">${(f.size/1024).toFixed(1)} KB</div>`;
+      const rm = document.createElement('button'); rm.className = 'rm'; rm.innerHTML = '×';
+      rm.onclick = () => { files.splice(i, 1); renderList(); };
+      item.appendChild(thumb); item.appendChild(info); item.appendChild(rm);
+      fileList.appendChild(item);
+    });
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+  }
+
+  // ---- 3. 提交 ----
+  submitBtn.addEventListener('click', async () => {
+    const note = el('noteInput').value.trim();
+    if (!files.length && !note) { alert('请至少选择 1 个文件或填写备注'); return; }
+
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '⏳ 上传中…';
+
+    statusBox.innerHTML = `<div class="card"><div class="status loading pulsing">
+      <span class="emoji">🤖</span>AI 正在识别并入账…
+      <div class="detail">大约需要 3-8 秒</div></div></div>`;
+
+    const fd = new FormData();
+    files.forEach(f => fd.append('files', f, f.name));
+    fd.append('text', note);
+    fd.append('submitter_name', el('nameInput').value.trim());
+
+    const t0 = Date.now();
+    try {
+      const r = await fetch(`${API}/upload-portal/public/${TOKEN}/submit`, { method: 'POST', body: fd });
+      const d = await r.json();
+      const dur = ((Date.now() - t0) / 1000).toFixed(1);
+
+      if (d.ok) {
+        const cls = d.classified_as || 'other';
+        const zh  = { invoice:'发票', bank_txn:'银行流水', receipt:'收据', report:'报告', other:'其他' }[cls] || cls;
+        statusBox.innerHTML = `<div class="card"><div class="status ok">
+          <span class="emoji">✅</span>
+          <div><strong>${d.reply || ('✓ 已收到 ' + (d.file_count || 0) + ' 个文件')}</strong></div>
+          <div class="detail">分类：${zh} · 已建档 ${d.linked_entity_ids?.length || 0} 条记录 · 用时 ${dur}s</div>
+          <div style="margin-top:12px;"><button class="btn primary" id="resetBtn">再传一批</button></div>
+        </div></div>`;
+        el('resetBtn').onclick = () => {
+          files = []; renderList();
+          el('noteInput').value = ''; el('nameInput').value = '';
+          statusBox.innerHTML = '';
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = '🚀 提交到 AiCFO';
+        };
+      } else {
+        statusBox.innerHTML = `<div class="card"><div class="status err">
+          <span class="emoji">❌</span>
+          <div>${d.error || '提交失败'}</div>
+          <div class="detail">用时 ${dur}s</div>
+        </div></div>`;
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '🚀 重试';
+      }
+    } catch (e) {
+      statusBox.innerHTML = `<div class="card"><div class="status err">
+        <span class="emoji">🚫</span>网络错误：${escapeHtml(e.message)}
+      </div></div>`;
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = '🚀 重试';
+    }
+  });
+})();
+</script>
+</body>
+</html>
