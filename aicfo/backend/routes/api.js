@@ -12,6 +12,7 @@ const aiChat = require('../services/ai-chat');
 const aiKB   = require('../services/ai-kb-builder');
 const fileIngest = require('../services/file-ingest');
 const waBot = require('../services/wa-bot');
+const waMeta = require('../services/wa-meta');
 const subs  = require('../services/subscription');
 const llmGateway = require('../services/llm-gateway');
 const sgRegistry = require('../services/sg-registry');
@@ -1131,6 +1132,101 @@ router.get('/wa/messages', (req, res) => {
   if (!ch) return res.json({ ok: true, messages: [] });
   const rows = db.prepare(`SELECT * FROM wa_messages WHERE channel_id=? ORDER BY received_at DESC LIMIT ?`).all(ch.id, +limit);
   res.json({ ok: true, channel_id: ch.id, messages: rows });
+});
+
+// ============================================================================
+// Meta WhatsApp Cloud API: webhook verify + real inbound + admin config
+// ============================================================================
+
+// Meta 挂 webhook 时会用 GET 验证
+router.get('/wa/webhook/meta', (req, res) => {
+  const mode      = req.query['hub.mode'];
+  const token     = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+  const r = waMeta.verifyWebhook({ mode, token, challenge });
+  if (r.ok) return res.status(200).send(String(r.challenge || ''));
+  res.status(403).send('verify failed');
+});
+
+// Meta 推送真实消息（入站图片/文字/文档）
+router.post('/wa/webhook/meta', async (req, res) => {
+  // Meta 要求 5 秒内回 200，先快速应答再异步处理
+  res.status(200).send('EVENT_RECEIVED');
+  try {
+    const msgs = waMeta.parseInboundPayload(req.body);
+    for (const m of msgs) {
+      // 找对应 channel：按 wa_phone 查
+      let ch = db.prepare(`SELECT * FROM wa_channels WHERE wa_phone=? AND status='active' ORDER BY created_at DESC LIMIT 1`).get(m.from);
+      // 首次接入且正文含 'LINK:xxxx' → 绑定
+      if (!ch) {
+        const linkMatch = (m.text || '').match(/LINK:([A-Z0-9\-]+)/i);
+        if (linkMatch) {
+          const lr = waBot.linkChannel({ token: linkMatch[1], wa_phone: m.from });
+          if (lr.ok) ch = db.prepare(`SELECT * FROM wa_channels WHERE id=?`).get(lr.channel_id);
+        }
+      }
+      if (!ch) {
+        console.log('[wa-meta] no channel for', m.from, 'text=', m.text);
+        // 自动回复提示绑定
+        const cfg = waMeta.readConfig();
+        if (cfg.auto_reply) {
+          await waMeta.sendText(m.from, '👋 欢迎使用 AiCFO Finance Bot！请先在小程序内支付成功后扫码发送 LINK:xxxx 绑定账户。').catch(()=>{});
+        }
+        continue;
+      }
+
+      // 下载媒体（图片/文件）→ 走现有 handleIncoming
+      let buffer = null, media_url = null;
+      if (m.media_id) {
+        const dl = await waMeta.downloadMedia(m.media_id);
+        if (dl.ok) buffer = dl.buffer;
+        media_url = `meta://${m.media_id}`;
+      }
+
+      const result = await waBot.handleIncoming({
+        channel_id: ch.id,
+        text:       m.text || '',
+        media_url,
+        media_mime: m.media_mime,
+        filename:   m.filename,
+        buffer,
+        msg_type:   m.type === 'text' ? 'text' : (m.media_mime?.startsWith('image/') ? 'image' : 'document'),
+      });
+
+      // 自动回复结果给用户
+      const cfg = waMeta.readConfig();
+      if (cfg.auto_reply && result.ok) {
+        await waMeta.sendText(m.from, result.reply || '✓ 已记录').catch(e => console.error('[wa-meta reply]', e.message));
+      }
+    }
+  } catch (e) {
+    console.error('[wa-meta webhook] handle error', e);
+  }
+});
+
+// ---- Admin config endpoints ----
+router.get('/admin/wa/config', (req, res) => {
+  res.json({ ok: true, config: waMeta.getMaskedConfig() });
+});
+
+router.post('/admin/wa/config', (req, res) => {
+  const allowed = ['phone_number_id','access_token','verify_token','bot_display_name','enabled','auto_reply'];
+  const patch = {};
+  for (const k of allowed) if (k in (req.body || {})) patch[k] = req.body[k];
+  const next = waMeta.updateConfig(patch);
+  res.json({ ok: true, config: waMeta.getMaskedConfig() });
+});
+
+router.post('/admin/wa/test', async (req, res) => {
+  const r = await waMeta.testConnection();
+  res.json(r);
+});
+
+router.post('/admin/wa/send', async (req, res) => {
+  const { to, text } = req.body || {};
+  if (!to || !text) return res.status(400).json({ ok: false, error: '需要 to + text' });
+  const r = await waMeta.sendText(to, text);
+  res.json(r);
 });
 
 // 7. 用户财务档案

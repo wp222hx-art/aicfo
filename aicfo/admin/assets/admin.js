@@ -25,7 +25,7 @@ function anav(route, params = {}) {
   astate.route = route;
   astate.params = params;
   document.querySelectorAll('.sidebar a').forEach(a => a.classList.toggle('active', a.dataset.route === route));
-  const routes = { overview, queue, agents, runs, playground, rag, training, retrieval, companies, users, archives, waChannels, llmGateway };
+  const routes = { overview, queue, agents, runs, playground, rag, training, retrieval, companies, users, archives, waChannels, llmGateway, waConfig };
   (routes[route] || overview)(params);
   window.scrollTo(0, 0);
 }
@@ -1221,3 +1221,202 @@ window.testLlmGateway = async function (tier, btn) {
     if (button) { button.disabled = false; button.innerHTML = origText; }
   }
 };
+
+// ================================================================================
+// 💬 WhatsApp Cloud API 配置页
+// ================================================================================
+async function waConfig() {
+  const app = document.getElementById('av');
+  if (!app) return;
+  app.innerHTML = `<div class="card"><h3>💬 WhatsApp Cloud API</h3><p class="muted">加载中…</p></div>`;
+
+  let cfg = {};
+  try {
+    const r = await api('/admin/wa/config');
+    cfg = r.config || {};
+  } catch (e) {
+    app.innerHTML = `<div class="card"><h3>💬 WhatsApp</h3><p style="color:#ef4444">加载失败：${esc(e.message)}</p></div>`;
+    return;
+  }
+
+  // 计算 webhook URL（基于当前浏览器地址）
+  const webhookUrl = `${location.origin}/api/wa/webhook/meta`;
+
+  app.innerHTML = `
+    <div class="card">
+      <h3>💬 WhatsApp Cloud API (Meta 官方)</h3>
+      <p class="muted">接入 Meta WhatsApp Cloud API，用户可直接用手机 WhatsApp 上传发票，AI 自动识别并归档，机器人自动回复处理结果。</p>
+
+      <div class="kv-grid" style="margin:10px 0 20px;display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px">
+        <div class="kv" style="padding:10px;background:#f8fafc;border-radius:8px">
+          <div class="muted" style="font-size:11px">配置状态</div>
+          <b>${cfg.configured ? '<span style="color:#10b981">✓ 已完成</span>' : '<span style="color:#f59e0b">⚠ 未完成</span>'}</b>
+        </div>
+        <div class="kv" style="padding:10px;background:#f8fafc;border-radius:8px">
+          <div class="muted" style="font-size:11px">启用状态</div>
+          <b>${cfg.enabled ? '<span style="color:#10b981">✓ 启用</span>' : '<span style="color:#94a3b8">✗ 未启用</span>'}</b>
+        </div>
+        <div class="kv" style="padding:10px;background:#f8fafc;border-radius:8px">
+          <div class="muted" style="font-size:11px">Access Token</div>
+          <b>${cfg.access_token_set ? `✓ ${esc(cfg.access_token)}` : '<span style="color:#ef4444">未配置</span>'}</b>
+        </div>
+        <div class="kv" style="padding:10px;background:#f8fafc;border-radius:8px">
+          <div class="muted" style="font-size:11px">自动回复</div>
+          <b>${cfg.auto_reply ? '✓ 开启' : '✗ 关闭'}</b>
+        </div>
+      </div>
+
+      <h4>📌 Meta 配置指引（4 步）</h4>
+      <ol style="line-height:1.9;background:#f8fafc;padding:14px 14px 14px 34px;border-radius:8px;font-size:13px">
+        <li>去 <a href="https://developers.facebook.com/apps/" target="_blank">developers.facebook.com/apps</a> 创建 App（选 <b>Business</b>），添加产品 <b>WhatsApp</b></li>
+        <li>在 WhatsApp → Getting Started 页面拿到 <b>Phone Number ID</b> 和 24h 临时 <b>Access Token</b>，填入下方</li>
+        <li>在 <b>Configuration → Webhook</b> 填：
+          <ul style="margin:4px 0 0 0">
+            <li>Callback URL: <code style="background:#eff6ff;padding:2px 6px;border-radius:3px">${webhookUrl}</code>
+              <button class="btn btn-sm" style="margin-left:6px" onclick="navigator.clipboard.writeText('${webhookUrl}');gwToast('✓ URL 已复制','ok')">📋 复制</button></li>
+            <li>Verify Token: 和下方"Verify Token"字段保持一致（默认 <code>${esc(cfg.verify_token || 'aicfo-verify-2026')}</code>）</li>
+          </ul>
+        </li>
+        <li>在 WhatsApp → API Setup 添加你自己的手机号到测试白名单，就能用手机 WhatsApp 给 Meta 测试号发消息了</li>
+      </ol>
+
+      <h4 class="mt-20">🔑 凭证配置</h4>
+      <div class="form-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:8px">
+        <label>Phone Number ID <span class="muted" style="font-size:11px">(Meta 测试号的 15 位数字 ID)</span>
+          <input id="wa_phone_number_id" class="input" value="${esc(cfg.phone_number_id || '')}" placeholder="123456789012345" />
+        </label>
+        <label>Access Token <span class="muted" style="font-size:11px">(EAAxx... 留空保留原值)</span>
+          <input id="wa_access_token" class="input" type="password" placeholder="${cfg.access_token_set ? '留空不变，已配置' : 'EAAxxxxxxxxxx...'}" autocomplete="new-password" />
+        </label>
+        <label>Verify Token <span class="muted" style="font-size:11px">(自定义字符串，须和 Meta 后台一致)</span>
+          <input id="wa_verify_token" class="input" value="${esc(cfg.verify_token || '')}" placeholder="aicfo-verify-2026" />
+        </label>
+        <label>Bot 显示名
+          <input id="wa_bot_display_name" class="input" value="${esc(cfg.bot_display_name || 'AiCFO Finance Bot')}" />
+        </label>
+        <label>启用
+          <select id="wa_enabled" class="input">
+            <option value="1" ${cfg.enabled ? 'selected' : ''}>✓ 启用 (真实发送/接收)</option>
+            <option value="0" ${!cfg.enabled ? 'selected' : ''}>✗ 停用 (仅接收解析，不主动发)</option>
+          </select>
+        </label>
+        <label>收到消息后自动回复
+          <select id="wa_auto_reply" class="input">
+            <option value="1" ${cfg.auto_reply ? 'selected' : ''}>✓ 自动回复处理结果</option>
+            <option value="0" ${!cfg.auto_reply ? 'selected' : ''}>✗ 静默模式</option>
+          </select>
+        </label>
+      </div>
+
+      <div style="margin-top:20px;display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn btn-primary" onclick="saveWaConfig(this)">💾 保存配置</button>
+        <button class="btn" onclick="testWaConnection(this)">🔗 测试连通 (graph.facebook.com)</button>
+        <button class="btn" onclick="openWaSendDialog()">✉️ 主动发送测试消息</button>
+        <button class="btn" onclick="anav('waConfig')">🔄 刷新</button>
+      </div>
+
+      <div id="wa_test_result" class="mt-20"></div>
+    </div>
+
+    <div class="card mt-20">
+      <h3>📥 Webhook 入站流程图</h3>
+      <pre style="background:#0f172a;color:#86efac;padding:16px;border-radius:8px;font-size:12px;overflow:auto;line-height:1.6">
+  ① 用户手机 WhatsApp 发送图片/文字
+         ↓
+  ② Meta Cloud API (graph.facebook.com) 推送到
+     ${webhookUrl}
+         ↓
+  ③ parseInboundPayload() 解析 from / text / media_id
+         ↓
+  ④ 按 wa_phone 找 channel (首次则识别 LINK:xxx 自动绑定)
+         ↓
+  ⑤ 有图片 → downloadMedia() 下载原图 → OCR
+         ↓
+  ⑥ waBot.handleIncoming() 分类入库 (invoices/transactions/wa_messages)
+         ↓
+  ⑦ auto_reply=on → sendText() 发"✓ 已记录 S$12.50"回用户手机</pre>
+    </div>`;
+}
+
+window.saveWaConfig = async function(btn) {
+  const button = btn || event?.target;
+  const orig = button ? button.innerHTML : '';
+  if (button) { button.disabled = true; button.innerHTML = '⏳ 保存中…'; }
+  const patch = {
+    phone_number_id:  document.getElementById('wa_phone_number_id').value.trim(),
+    verify_token:     document.getElementById('wa_verify_token').value.trim(),
+    bot_display_name: document.getElementById('wa_bot_display_name').value.trim(),
+    enabled:          document.getElementById('wa_enabled').value === '1',
+    auto_reply:       document.getElementById('wa_auto_reply').value === '1',
+  };
+  const tok = document.getElementById('wa_access_token').value.trim();
+  if (tok) patch.access_token = tok;
+  try {
+    const r = await api('/admin/wa/config', { method:'POST', body: JSON.stringify(patch) });
+    gwToast('✓ WhatsApp 配置已保存', 'ok');
+    if (button) { button.innerHTML = '✓ 已保存'; button.style.background = '#10b981'; }
+    setTimeout(() => anav('waConfig'), 800);
+  } catch(e) {
+    if (button) { button.disabled = false; button.innerHTML = orig; }
+    gwToast(`✗ 保存失败：${esc(e.message)}`, 'err');
+  }
+};
+
+window.testWaConnection = async function(btn) {
+  const button = btn || event?.target;
+  const orig = button ? button.innerHTML : '';
+  if (button) { button.disabled = true; button.innerHTML = '⏳ 测试中…'; }
+  const box = document.getElementById('wa_test_result');
+  box.innerHTML = `<div class="alert" style="background:#eff6ff;border-left:4px solid #0ea5e9;padding:12px">⏳ 向 graph.facebook.com 查询 Phone Number 信息…</div>`;
+  try {
+    const r = await api('/admin/wa/test', { method:'POST', body:'{}' });
+    if (r.ok) {
+      box.innerHTML = `<div class="alert" style="background:#ecfdf5;border-left:4px solid #10b981;padding:12px">
+        <b style="color:#065f46">✓ 连通成功</b><br/>
+        display_phone_number=<code>${esc(r.display_phone_number || '-')}</code><br/>
+        verified_name=<code>${esc(r.verified_name || '-')}</code><br/>
+        quality_rating=<code>${esc(r.quality_rating || '-')}</code>
+      </div>`;
+      gwToast('✓ Meta 连通成功', 'ok');
+    } else {
+      box.innerHTML = `<div class="alert" style="background:#fef2f2;border-left:4px solid #ef4444;padding:12px">
+        <b style="color:#991b1b">✗ 连通失败</b><br/>${esc(r.error || 'unknown')}
+      </div>`;
+      gwToast('✗ 连通失败', 'err');
+    }
+  } catch(e) {
+    box.innerHTML = `<div style="color:#ef4444">请求失败：${esc(e.message)}</div>`;
+  } finally {
+    if (button) { button.disabled = false; button.innerHTML = orig; }
+  }
+};
+
+window.openWaSendDialog = function() {
+  const to = prompt('输入接收方 WhatsApp 手机号（含国家码，如 6591234567，不加 +）:');
+  if (!to) return;
+  const text = prompt('输入要发送的消息内容:', '👋 这是来自 AiCFO 的测试消息');
+  if (!text) return;
+  sendWaMessage(to.trim(), text);
+};
+
+async function sendWaMessage(to, text) {
+  const box = document.getElementById('wa_test_result');
+  box.innerHTML = `<div class="alert" style="background:#eff6ff;border-left:4px solid #0ea5e9;padding:12px">⏳ 向 ${esc(to)} 发送消息…</div>`;
+  try {
+    const r = await api('/admin/wa/send', { method:'POST', body: JSON.stringify({ to, text }) });
+    if (r.ok) {
+      box.innerHTML = `<div class="alert" style="background:#ecfdf5;border-left:4px solid #10b981;padding:12px">
+        <b style="color:#065f46">✓ 发送成功</b><br/>
+        wa_message_id=<code>${esc(r.wa_message_id || '-')}</code><br/>
+        <span class="muted">请在 WhatsApp 手机端查看</span>
+      </div>`;
+      gwToast('✓ 消息已发送', 'ok');
+    } else {
+      box.innerHTML = `<div class="alert" style="background:#fef2f2;border-left:4px solid #ef4444;padding:12px">
+        <b style="color:#991b1b">✗ 发送失败</b><br/>${esc(r.error || 'unknown')}
+      </div>`;
+    }
+  } catch(e) {
+    box.innerHTML = `<div style="color:#ef4444">请求失败：${esc(e.message)}</div>`;
+  }
+}
