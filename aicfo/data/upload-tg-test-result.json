@@ -1,5 +1,5 @@
 {
-  "ts": "2026-05-03T14:48:25.773Z",
+  "ts": "2026-05-03T14:52:14.570Z",
   "base": "http://localhost:3000",
   "results": {
     "ok": 33,
@@ -13,12 +13,12 @@
       {
         "name": "返回 token UP-xxxx",
         "ok": true,
-        "extra": "token=UP-B65AFC3675"
+        "extra": "token=UP-A5DD3C75A3"
       },
       {
         "name": "返回完整 URL",
         "ok": true,
-        "extra": "url=http://localhost:3000/upload/UP-B65AFC3675"
+        "extra": "url=http://localhost:3000/upload/UP-A5DD3C75A3"
       },
       {
         "name": "返回二维码 DataURL",
@@ -139,7 +139,7 @@
       {
         "name": "返回 handled.ok",
         "ok": true,
-        "extra": "{\"ok\":true,\"classified_as\":\"invoice\",\"confidence\":0.8,\"linked_entity_id\":\"inv_wa_c14827\"}"
+        "extra": "{\"ok\":true,\"classified_as\":\"invoice\",\"confidence\":0.8,\"linked_entity_id\":\"inv_wa_00c1ff\"}"
       },
       {
         "name": "classified_as 可能为 invoice",

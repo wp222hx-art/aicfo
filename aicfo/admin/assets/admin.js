@@ -1945,9 +1945,11 @@ async function companyArchiveDetail(params) {
               · 创建于 ${esc((c.created_at || '').slice(0,10))}
             </div>
           </div>
-          <div style="display:flex;gap:8px">
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button class="btn" style="background:rgba(255,255,255,0.15);color:#fff;border:1px solid rgba(255,255,255,0.3)" onclick="arcSnapshot('${esc(id)}')">📸 生成快照</button>
-            <button class="btn" style="background:rgba(255,255,255,0.15);color:#fff;border:1px solid rgba(255,255,255,0.3)" onclick="arcExport()">⬇️ 导出 JSON</button>
+            <a class="btn" style="background:rgba(255,255,255,0.15);color:#fff;border:1px solid rgba(255,255,255,0.3);text-decoration:none" href="/api/admin/archive/company/${esc(id)}" target="_blank">⬇️ JSON</a>
+            <a class="btn" style="background:rgba(255,255,255,0.15);color:#fff;border:1px solid rgba(255,255,255,0.3);text-decoration:none" href="/api/admin/archive/company/${esc(id)}/export.csv" target="_blank">📊 CSV</a>
+            <a class="btn" style="background:rgba(255,255,255,0.15);color:#fff;border:1px solid rgba(255,255,255,0.3);text-decoration:none" href="/api/admin/archive/company/${esc(id)}/export.html" target="_blank">🖨️ PDF (HTML→打印)</a>
             <button class="btn" style="background:#fff;color:#2563eb" onclick="arcNewService('${esc(id)}')">🚀 发起新服务</button>
           </div>
         </div>

@@ -1430,6 +1430,30 @@ router.post('/admin/archive/company/:id/snapshot', (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ---------- 档案导出：CSV ----------
+// section: all | invoices | transactions | tax_filings | documents | uploads | wa_messages | payments | timeline
+router.get('/admin/archive/company/:id/export.csv', (req, res) => {
+  try {
+    const section = req.query.section || 'all';
+    const r = archive.exportCSV(req.params.id, section);
+    if (!r) return res.status(404).send('company not found');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${r.filename}"`);
+    // UTF-8 BOM for Excel compatibility
+    res.send('\ufeff' + r.body);
+  } catch (e) { res.status(500).send('export failed: ' + e.message); }
+});
+
+// ---------- 档案导出：可打印 HTML（用户在浏览器另存为 PDF） ----------
+router.get('/admin/archive/company/:id/export.html', (req, res) => {
+  try {
+    const html = archive.exportPrintableHTML(req.params.id);
+    if (!html) return res.status(404).send('company not found');
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (e) { res.status(500).send('export failed: ' + e.message); }
+});
+
 // ================================================================================
 // LLM Gateway (Tokenhot.ai 统一网关) — 配置 / 测试 / 日志
 // ================================================================================

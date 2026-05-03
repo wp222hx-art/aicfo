@@ -1769,8 +1769,10 @@ async function viewMyArchiveDetail({ id } = {}) {
         </div>` : `<p class="muted">暂无历史事件。</p>`}
       </div>
 
-      <div style="display:flex;gap:10px">
-        <a class="btn btn-primary" href="/api/admin/archive/company/${esc(c.id)}" target="_blank">⬇️ 导出完整 JSON</a>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <a class="btn btn-primary" href="/api/admin/archive/company/${esc(c.id)}/export.html" target="_blank">🖨️ 打印 / 保存 PDF</a>
+        <a class="btn" href="/api/admin/archive/company/${esc(c.id)}/export.csv" target="_blank">📊 导出 CSV</a>
+        <a class="btn" href="/api/admin/archive/company/${esc(c.id)}" target="_blank">⬇️ 原始 JSON</a>
         <button class="btn" onclick="nav('myArchive')">← 返回列表</button>
       </div>
     `;

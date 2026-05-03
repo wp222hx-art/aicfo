@@ -389,4 +389,184 @@ module.exports = {
   getFullArchive,
   listAllCompaniesWithSummary,
   createSnapshot,
+  exportCSV,
+  exportPrintableHTML,
 };
+
+// ---------- 12. CSV 导出（支持按节选择） ----------
+function csvEscape(v) {
+  if (v === null || v === undefined) return '';
+  const s = String(v).replace(/"/g, '""');
+  return /[",\n\r]/.test(s) ? `"${s}"` : s;
+}
+function rowsToCSV(headers, rows) {
+  const out = [headers.map(csvEscape).join(',')];
+  for (const r of rows) out.push(headers.map(h => csvEscape(r[h])).join(','));
+  return out.join('\n');
+}
+
+function exportCSV(company_id, section = 'all') {
+  const a = getFullArchive(company_id);
+  if (!a) return null;
+  const sections = {};
+
+  sections.invoices = rowsToCSV(
+    ['id', 'invoice_number', 'vendor_name', 'issue_date', 'total', 'gst_amount', 'currency', 'status', 'ocr_confidence', 'image_url', 'created_at'],
+    a.expenses.invoices
+  );
+  sections.transactions = rowsToCSV(
+    ['id', 'transaction_date', 'amount', 'currency', 'description', 'counterparty', 'reference', 'created_at'],
+    a.expenses.transactions
+  );
+  sections.tax_filings = rowsToCSV(
+    ['id', 'filing_type', 'ya', 'period_start', 'period_end', 'revenue', 'chargeable_income', 'tax_payable', 'status', 'created_at'],
+    a.tax.filings
+  );
+  sections.documents = rowsToCSV(
+    ['id', 'kind', 'version', 'file_path', 'generated_by_ai', 'created_at'],
+    a.history.documents
+  );
+  sections.uploads = rowsToCSV(
+    ['id', 'token', 'submitter_name', 'submitter_phone', 'file_count', 'classified_as', 'note', 'created_at'],
+    a.history.uploads
+  );
+  sections.wa_messages = rowsToCSV(
+    ['id', 'direction', 'msg_type', 'content', 'classified_as', 'ai_confidence', 'ai_summary', 'media_url', 'received_at'],
+    a.history.wa_messages
+  );
+  sections.payments = rowsToCSV(
+    ['id', 'amount_sgd', 'method', 'status', 'gateway_ref', 'paid_at', 'created_at'],
+    a.billing.payments
+  );
+  sections.timeline = rowsToCSV(
+    ['ts', 'type', 'title', 'detail', 'ref_id'],
+    a.timeline
+  );
+
+  if (section !== 'all' && sections[section]) {
+    return { company: a.company, filename: `${a.company.id}_${section}.csv`, body: sections[section] };
+  }
+  // all → 把所有节合并为一份多节 CSV（每节之间加空行和表头注释）
+  const parts = [];
+  parts.push(`# AiCFO Archive Export — ${a.company.name} (${a.company.id})`);
+  parts.push(`# Generated at: ${new Date().toISOString()}`);
+  parts.push('');
+  for (const [name, body] of Object.entries(sections)) {
+    parts.push(`# ===== ${name.toUpperCase()} =====`);
+    parts.push(body);
+    parts.push('');
+  }
+  return { company: a.company, filename: `${a.company.id}_archive_full.csv`, body: parts.join('\n') };
+}
+
+// ---------- 13. 可打印 HTML（客户端可另存为 PDF） ----------
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+function exportPrintableHTML(company_id) {
+  const a = getFullArchive(company_id);
+  if (!a) return null;
+  const c = a.company;
+  const s = a.expenses.summary;
+  const ownerName = a.owner?.name || a.owner?.email || '-';
+
+  const invRows = a.expenses.invoices.slice(0, 200).map(i => `
+    <tr>
+      <td>${i.image_url ? `<img src="${esc(i.image_url)}" style="width:40px;height:40px;object-fit:cover;border:1px solid #ccc">` : ''}</td>
+      <td>${esc(i.invoice_number || i.id)}</td>
+      <td>${esc(i.vendor_name || '-')}</td>
+      <td>${esc(i.issue_date || '-')}</td>
+      <td style="text-align:right">${esc(i.currency || 'SGD')} ${(i.total || 0).toFixed(2)}</td>
+      <td style="text-align:right">${(i.gst_amount || 0).toFixed(2)}</td>
+      <td>${esc(i.status)}</td>
+    </tr>`).join('');
+
+  const txnRows = a.expenses.transactions.slice(0, 200).map(t => `
+    <tr>
+      <td>${esc(t.transaction_date || '-')}</td>
+      <td style="text-align:right;color:${t.amount >= 0 ? 'green' : 'red'}">${(t.amount || 0).toFixed(2)}</td>
+      <td>${esc(t.description || '-')}</td>
+      <td>${esc(t.counterparty || '-')}</td>
+    </tr>`).join('');
+
+  const taxRows = a.tax.filings.slice(0, 50).map(f => `
+    <tr>
+      <td>${esc(f.filing_type || '-')}</td>
+      <td>${esc(f.ya || '-')}</td>
+      <td>${esc(f.period_end || '-')}</td>
+      <td style="text-align:right">${(f.revenue || 0).toFixed(2)}</td>
+      <td style="text-align:right">${(f.tax_payable || 0).toFixed(2)}</td>
+      <td>${esc(f.status)}</td>
+    </tr>`).join('');
+
+  const docRows = a.history.documents.slice(0, 50).map(d => `
+    <tr>
+      <td>${esc(d.kind)}</td>
+      <td>v${d.version || 1}</td>
+      <td style="font-family:monospace;font-size:11px">${esc((d.file_path || '').slice(0, 60))}</td>
+      <td>${esc((d.created_at || '').slice(0, 16))}</td>
+    </tr>`).join('');
+
+  const timelineRows = a.timeline.slice(0, 80).map(e => `
+    <tr>
+      <td>${esc((e.ts || '').slice(0, 16))}</td>
+      <td>${e.icon || ''} ${esc(e.type || '')}</td>
+      <td>${esc(e.title || '')}</td>
+      <td>${esc(e.detail || '')}</td>
+    </tr>`).join('');
+
+  return `<!doctype html>
+<html lang="zh"><head><meta charset="utf-8">
+<title>档案导出 · ${esc(c.name)}</title>
+<style>
+  body{font-family:-apple-system,Segoe UI,Arial,sans-serif;color:#111;max-width:1000px;margin:20px auto;padding:0 20px;background:#fff}
+  h1{font-size:24px;margin:0 0 4px}
+  h2{font-size:16px;margin:26px 0 8px;padding-bottom:4px;border-bottom:2px solid #333}
+  .muted{color:#666;font-size:12px}
+  table{width:100%;border-collapse:collapse;margin:8px 0 16px;font-size:12px}
+  th,td{border:1px solid #ddd;padding:5px 8px;vertical-align:top}
+  th{background:#f5f5f5;font-weight:600;text-align:left}
+  .summary{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:12px 0}
+  .card{border:1px solid #ddd;padding:10px;border-radius:6px}
+  .card .lbl{color:#666;font-size:11px}
+  .card .val{font-size:18px;font-weight:700}
+  .toolbar{position:sticky;top:0;background:#fff;padding:10px 0;border-bottom:1px solid #eee;margin-bottom:10px;display:flex;gap:8px}
+  .toolbar button{padding:6px 14px;border:1px solid #333;background:#111;color:#fff;border-radius:6px;cursor:pointer;font-size:13px}
+  @media print { .toolbar{display:none} body{margin:0;padding:0} h2{page-break-before:auto} table{page-break-inside:auto} tr{page-break-inside:avoid} }
+</style></head><body>
+<div class="toolbar">
+  <button onclick="window.print()">🖨️ 打印 / 保存为 PDF</button>
+  <button onclick="history.back()" style="background:#fff;color:#111">← 返回</button>
+  <span class="muted" style="align-self:center">提示：点"打印"后选择"另存为 PDF"即可导出 PDF</span>
+</div>
+
+<h1>🏢 ${esc(c.name)}</h1>
+<div class="muted">UEN: ${esc(c.uen || '-')} · 状态: <b>${esc(c.status)}</b> · 订阅: ${esc(c.subscription_tier || 'basic')} · 细分: ${esc(c.segment || '')} · 创建于 ${esc((c.created_at || '').slice(0, 10))}</div>
+<div class="muted">负责人: ${esc(ownerName)} · 导出时间: ${new Date().toLocaleString('zh-SG')}</div>
+
+<div class="summary">
+  <div class="card"><div class="lbl">总收入</div><div class="val" style="color:#10b981">S$ ${(s.total_income || 0).toFixed(2)}</div></div>
+  <div class="card"><div class="lbl">总支出</div><div class="val" style="color:#ef4444">S$ ${(s.total_expense || 0).toFixed(2)}</div></div>
+  <div class="card"><div class="lbl">净现金流</div><div class="val">S$ ${(s.net_cashflow || 0).toFixed(2)}</div></div>
+  <div class="card"><div class="lbl">发票总额</div><div class="val">S$ ${(s.total_invoice_amount || 0).toFixed(2)}</div></div>
+</div>
+
+<h2>🧾 发票 (${a.expenses.invoices.length})</h2>
+${invRows ? `<table><thead><tr><th>原件</th><th>发票号</th><th>供应商</th><th>日期</th><th>金额</th><th>GST</th><th>状态</th></tr></thead><tbody>${invRows}</tbody></table>` : '<p class="muted">无</p>'}
+
+<h2>💸 交易流水 (${a.expenses.transactions.length})</h2>
+${txnRows ? `<table><thead><tr><th>日期</th><th>金额</th><th>描述</th><th>对方</th></tr></thead><tbody>${txnRows}</tbody></table>` : '<p class="muted">无</p>'}
+
+<h2>🏛️ 税务申报 (${a.tax.filings.length})</h2>
+${taxRows ? `<table><thead><tr><th>类型</th><th>YA</th><th>期末</th><th>营收</th><th>应纳</th><th>状态</th></tr></thead><tbody>${taxRows}</tbody></table>` : '<p class="muted">暂无申报</p>'}
+
+<h2>📄 文档记录 (${a.history.documents.length})</h2>
+${docRows ? `<table><thead><tr><th>类型</th><th>版本</th><th>路径</th><th>创建</th></tr></thead><tbody>${docRows}</tbody></table>` : '<p class="muted">无</p>'}
+
+<h2>⏰ 时间线 (最近 ${Math.min(80, a.timeline.length)} 条)</h2>
+${timelineRows ? `<table><thead><tr><th style="width:140px">时间</th><th style="width:120px">类型</th><th>标题</th><th>详情</th></tr></thead><tbody>${timelineRows}</tbody></table>` : '<p class="muted">无</p>'}
+
+<div style="margin-top:30px;padding-top:10px;border-top:1px solid #ddd;text-align:center;color:#999;font-size:11px">
+  AiCFO Company Archive · ${c.id} · 本文档包含原始数据镜像，请妥善保管
+</div>
+</body></html>`;
+}
