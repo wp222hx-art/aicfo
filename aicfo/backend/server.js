@@ -23,6 +23,16 @@ app.use((req, res, next) => {
   next();
 });
 
+// 上传文件服务：/api/files/:fname → data/uploads/ 下的实际文件
+app.get('/api/files/:fname', (req, res) => {
+  const fname = req.params.fname;
+  // 防目录穿越
+  if (!/^[A-Za-z0-9_\-.]+$/.test(fname)) return res.status(400).send('bad filename');
+  const abs = path.join(__dirname, '..', 'data', 'uploads', fname);
+  if (!fs.existsSync(abs)) return res.status(404).send('not found');
+  res.sendFile(abs);
+});
+
 // API
 app.use('/api', api);
 

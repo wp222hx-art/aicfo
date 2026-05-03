@@ -4,9 +4,28 @@
 // - 写入 wa_messages + 更新 user_finance_archive
 const { v4: uuid } = require('uuid');
 const QRCode = require('qrcode');
+const fs = require('fs');
+const path = require('path');
 const db = require('../db/schema');
 const llmReal = require('./llm-real');
 const rag = require('../../rag/engine');
+
+// 上传文件物理存储目录
+const UPLOADS_DIR = path.join(__dirname, '..', '..', 'data', 'uploads');
+try { fs.mkdirSync(UPLOADS_DIR, { recursive: true }); } catch (_) {}
+
+function persistBuffer(buffer, mime, originalname) {
+  if (!buffer || !Buffer.isBuffer(buffer)) return null;
+  const extFromName = originalname ? path.extname(originalname) : '';
+  const extFromMime = mime ? '.' + mime.split('/')[1].split(';')[0] : '';
+  const ext = extFromName || extFromMime || '.bin';
+  const safeId = uuid().replace(/-/g, '').slice(0, 16);
+  const fname = safeId + ext;
+  const abs = path.join(UPLOADS_DIR, fname);
+  fs.writeFileSync(abs, buffer);
+  // 对外可访问的 URL（由 /api/files/:fname 路由服务）
+  return { abs, rel: '/api/files/' + fname, size: buffer.length, mime };
+}
 
 const BOT_PHONE = process.env.AICFO_WA_BOT_PHONE || '6580000000'; // 模拟 bot 号
 const PUBLIC_BASE = process.env.AICFO_PUBLIC_BASE_URL || '';
@@ -77,6 +96,12 @@ async function handleIncoming({ channel_id, text = '', media_url = null, media_m
   const msgId = 'wam_' + uuid().slice(0, 8);
   const cls = await classifyMessage({ text, has_media: !!(media_url || buffer), media_mime, filename });
 
+  // 如果带有真实文件 buffer，先落盘，拿到公网可访问 URL
+  const persisted = persistBuffer(buffer, media_mime, filename);
+  if (persisted) {
+    media_url = persisted.rel;  // 覆盖掉 upload://token/… 占位符
+  }
+
   let linked_entity_type = null, linked_entity_id = null, ai_summary = null;
 
   // 发票类：入 invoices 表（即使没有真实 OCR，也写一条占位发票）
@@ -86,9 +111,9 @@ async function handleIncoming({ channel_id, text = '', media_url = null, media_m
     const amountMatch = text.match(/(\d+(?:[,.]\d{2})?)/);
     const total = amountMatch ? parseFloat(amountMatch[1].replace(',', '')) : 0;
     const gst = +(total * 0.09 / 1.09).toFixed(2);
-    db.prepare(`INSERT INTO invoices(id, company_id, vendor_name, invoice_number, issue_date, total, gst_amount, currency, ocr_confidence, ocr_raw, status, created_at)
-                VALUES(?,?,?,?,?,?,?, 'SGD', ?, ?, 'pending_review', CURRENT_TIMESTAMP)`)
-      .run(invId, ch.company_id, vendor, 'WA-' + msgId, new Date().toISOString().slice(0, 10), total, gst, cls.confidence, text || filename || '');
+    db.prepare(`INSERT INTO invoices(id, company_id, vendor_name, invoice_number, issue_date, total, gst_amount, currency, ocr_confidence, ocr_raw, image_url, status, created_at)
+                VALUES(?,?,?,?,?,?,?, 'SGD', ?, ?, ?, 'pending_review', CURRENT_TIMESTAMP)`)
+      .run(invId, ch.company_id, vendor, 'WA-' + msgId, new Date().toISOString().slice(0, 10), total, gst, cls.confidence, text || filename || '', media_url);
     linked_entity_type = 'invoices'; linked_entity_id = invId;
     ai_summary = `已识别发票: ${vendor}, 金额 S$${total}, GST S$${gst}`;
   }
@@ -115,6 +140,21 @@ async function handleIncoming({ channel_id, text = '', media_url = null, media_m
     ai_summary = '收到财务报表';
   } else {
     ai_summary = '已接收消息，暂未匹配业务分类';
+  }
+
+  // 如果落盘了文件但上面分支没写入 documents，这里补记一条文档，确保文件能在档案里看到
+  if (persisted && !(linked_entity_type === 'documents' || linked_entity_type === 'invoices')) {
+    const docId = 'doc_up_' + uuid().slice(0, 6);
+    try {
+      const docKind = cls.kind === 'receipt' ? 'receipt'
+        : cls.kind === 'bank_txn' ? 'bank_statement'
+        : (media_mime || '').startsWith('image/') ? 'image' : 'attachment';
+      db.prepare(`INSERT INTO documents(id, company_id, kind, version, file_path, content, created_at)
+                  VALUES(?,?,?, 1, ?, ?, CURRENT_TIMESTAMP)`)
+        .run(docId, ch.company_id, docKind, media_url, text || filename || '');
+      // 如果原来什么都没挂，就把 documents 挂上
+      if (!linked_entity_type) { linked_entity_type = 'documents'; linked_entity_id = docId; }
+    } catch (e) { /* ignore */ }
   }
 
   db.prepare(`INSERT INTO wa_messages(id, channel_id, user_id, company_id, direction, msg_type, media_url, content, classified_as, linked_entity_type, linked_entity_id, ai_confidence, ai_summary, processed, received_at)

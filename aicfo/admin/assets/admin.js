@@ -2086,11 +2086,12 @@ function arcRenderExpenses(a) {
         </tr>`).join('')}</tbody>
     </table>` : `<p class="muted">暂无交易</p>`}
 
-    <h4 style="margin-top:20px">🧾 发票 (${a.expenses.invoices.length})</h4>
+    <h4 style="margin-top:20px">🧾 发票 (${a.expenses.invoices.length}) — 点缩略图查看原件</h4>
     ${a.expenses.invoices.length ? `<table class="arc-tbl">
-      <thead><tr><th>发票号</th><th>供应商</th><th>日期</th><th>金额</th><th>GST</th><th>状态</th><th>置信度</th></tr></thead>
+      <thead><tr><th style="width:80px">原件</th><th>发票号</th><th>供应商</th><th>日期</th><th>金额</th><th>GST</th><th>状态</th><th>置信度</th></tr></thead>
       <tbody>${a.expenses.invoices.slice(0,100).map(i => `
         <tr>
+          <td>${(typeof arcRenderFile==='function') ? arcRenderFile(i.image_url, 'image/*') : (i.image_url ? `<a href="${esc(i.image_url)}" target="_blank">查看</a>` : '<span class="muted">-</span>')}</td>
           <td><code>${esc(i.invoice_number || i.id.slice(-8))}</code></td>
           <td>${esc(i.vendor_name || '-')}</td>
           <td>${esc(i.issue_date || '-')}</td>
@@ -2184,7 +2185,44 @@ function arcRenderReports(a) {
   `;
 }
 
+// 把 file_path / media_url 渲染成可点开的缩略图 / 下载链接
+function arcRenderFile(url, mime) {
+  if (!url) return '<span class="muted">-</span>';
+  const u = String(url);
+  const isImg = /\.(png|jpg|jpeg|gif|webp|bmp)$/i.test(u) || /^image\//.test(mime || '');
+  const isPdf = /\.pdf$/i.test(u) || (mime || '').includes('pdf');
+  const abs = u.startsWith('/') ? u : (u.startsWith('http') ? u : '');
+  if (!abs) return `<code style="font-size:11px">${esc(u.slice(0, 40))}</code>`;
+  if (isImg) {
+    return `<a href="${abs}" target="_blank" title="点击查看原图">
+      <img src="${abs}" style="width:56px;height:56px;object-fit:cover;border:1px solid #e5e7eb;border-radius:6px;vertical-align:middle" onerror="this.style.display='none';this.insertAdjacentHTML('afterend','<span class=\\'muted\\' style=\\'font-size:11px\\'>(图片丢失)</span>')">
+    </a>`;
+  }
+  const icon = isPdf ? '📄' : (mime || '').startsWith('video/') ? '🎬' : (mime || '').startsWith('audio/') ? '🎵' : '📎';
+  return `<a href="${abs}" target="_blank" style="text-decoration:none">${icon} <span style="font-size:12px">${esc(u.split('/').pop().slice(0, 24))}</span></a>`;
+}
+
+// 从 linked_entity_ids 数组中拉出关联的发票/文档的实际 file_url（通过全量 archive 缓存查找）
+function arcFindFileByLinkedId(a, eid) {
+  if (!eid) return null;
+  // 先找 invoices.image_url
+  const inv = (a.expenses && a.expenses.invoices || []).find(x => x.id === eid);
+  if (inv && inv.image_url) return inv.image_url;
+  // 再找 documents.file_path
+  const doc = (a.history && a.history.documents || []).find(x => x.id === eid);
+  if (doc && doc.file_path) return doc.file_path;
+  return null;
+}
+
 function arcRenderHistory(a) {
+  // 预计算：关联到 uploads 里的 linked_entity_ids 第一个文件
+  const uploadsWithFile = (a.history.uploads || []).map(u => {
+    let ids = [];
+    try { ids = JSON.parse(u.linked_entity_ids || '[]'); } catch (_) {}
+    const firstFile = ids.map(id => arcFindFileByLinkedId(a, id)).find(Boolean);
+    return { ...u, _preview: firstFile };
+  });
+
   return `
     <div class="grid" style="grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px">
       <div class="card" style="padding:12px;text-align:center"><div class="muted" style="font-size:11px">文档</div><div style="font-size:22px;font-weight:700">${a.history.documents.length}</div></div>
@@ -2193,36 +2231,40 @@ function arcRenderHistory(a) {
       <div class="card" style="padding:12px;text-align:center"><div class="muted" style="font-size:11px">AI 执行</div><div style="font-size:22px;font-weight:700">${a.history.agent_runs.length}</div></div>
     </div>
 
-    <h4>📄 文档记录</h4>
+    <h4>📄 文档记录（含上传文件）</h4>
     ${a.history.documents.length ? `<table class="arc-tbl">
-      <thead><tr><th>类型</th><th>版本</th><th>文件</th><th>AI</th><th>创建</th></tr></thead>
+      <thead><tr><th style="width:80px">预览</th><th>类型</th><th>版本</th><th>文件路径</th><th>AI</th><th>创建</th></tr></thead>
       <tbody>${a.history.documents.slice(0,30).map(d => `<tr>
+        <td>${arcRenderFile(d.file_path)}</td>
         <td><b>${esc(d.kind || '-')}</b></td><td>v${d.version || 1}</td>
-        <td><code style="font-size:11px">${esc((d.file_path || '').slice(0,40))}</code></td>
+        <td><code style="font-size:11px">${esc((d.file_path || '').slice(0,50))}</code></td>
         <td>${d.generated_by_ai ? '🤖' : '👤'}</td>
         <td>${esc((d.created_at || '').slice(0,16))}</td>
       </tr>`).join('')}</tbody>
     </table>` : `<p class="muted">暂无</p>`}
 
-    <h4 style="margin-top:20px">📤 上传记录</h4>
-    ${a.history.uploads.length ? `<table class="arc-tbl">
-      <thead><tr><th>链接</th><th>提交人</th><th>文件数</th><th>分类</th><th>时间</th></tr></thead>
-      <tbody>${a.history.uploads.slice(0,30).map(u => `<tr>
-        <td><code style="font-size:11px">${esc(u.token_code || '-')}</code> ${esc(u.token_label || '')}</td>
+    <h4 style="margin-top:20px">📤 上传记录（点图预览原文件）</h4>
+    ${uploadsWithFile.length ? `<table class="arc-tbl">
+      <thead><tr><th style="width:80px">预览</th><th>链接</th><th>提交人</th><th>文件数</th><th>分类</th><th>关联单据</th><th>时间</th></tr></thead>
+      <tbody>${uploadsWithFile.slice(0,30).map(u => `<tr>
+        <td>${arcRenderFile(u._preview)}</td>
+        <td><code style="font-size:11px">${esc(u.token_code || u.token || '-')}</code> ${esc(u.token_label || '')}</td>
         <td>${esc(u.submitter_name || '匿名')}</td>
         <td>${u.file_count || 0}</td>
         <td>${esc(u.classified_as || '-')}</td>
+        <td style="font-size:11px">${esc((u.linked_entity_ids || '[]').replace(/[\[\]"]/g,'').slice(0,40))}</td>
         <td>${esc((u.created_at || '').slice(0,16))}</td>
       </tr>`).join('')}</tbody>
     </table>` : `<p class="muted">暂无上传</p>`}
 
-    <h4 style="margin-top:20px">💬 WhatsApp 消息</h4>
+    <h4 style="margin-top:20px">💬 WhatsApp / 上传消息（含图片原件）</h4>
     ${a.history.wa_messages.length ? `<table class="arc-tbl">
-      <thead><tr><th>方向</th><th>类型</th><th>内容</th><th>分类</th><th>置信度</th><th>时间</th></tr></thead>
+      <thead><tr><th style="width:80px">预览</th><th>方向</th><th>类型</th><th>内容</th><th>分类</th><th>置信度</th><th>时间</th></tr></thead>
       <tbody>${a.history.wa_messages.slice(0,30).map(m => `<tr>
+        <td>${arcRenderFile(m.media_url, m.msg_type === 'image' ? 'image/*' : '')}</td>
         <td>${m.direction === 'in' ? '📥' : '📤'}</td>
         <td>${esc(m.msg_type || 'text')}</td>
-        <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis">${esc((m.content || '').slice(0,80))}</td>
+        <td style="max-width:260px;overflow:hidden;text-overflow:ellipsis">${esc((m.content || '').slice(0,80))}</td>
         <td>${esc(m.classified_as || '-')}</td>
         <td>${m.ai_confidence != null ? (m.ai_confidence * 100).toFixed(0) + '%' : '-'}</td>
         <td>${esc((m.received_at || '').slice(0,16))}</td>
@@ -2236,7 +2278,7 @@ function arcRenderHistory(a) {
         <td><b>${esc(r.agent_id)}</b></td>
         <td>${esc(r.status)}</td>
         <td>${r.latency_ms || '-'} ms</td>
-        <td>${esc((r.started_at || '').slice(0,16))}</td>
+        <td>${esc((r.created_at || r.started_at || '').slice(0,16))}</td>
       </tr>`).join('')}</tbody>
     </table>` : `<p class="muted">暂无</p>`}
   `;
