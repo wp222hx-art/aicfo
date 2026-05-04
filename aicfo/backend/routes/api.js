@@ -19,6 +19,10 @@ const archive = require('../services/company-archive');
 const subs  = require('../services/subscription');
 const llmGateway = require('../services/llm-gateway');
 const sgRegistry = require('../services/sg-registry');
+const sgRegAgent = require('../services/sg-reg-agent');
+const constitutionEngine = require('../services/constitution-engine');
+const kycConnector = require('../services/kyc-connector');
+const billingGate = require('../services/billing-gate');
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
@@ -46,7 +50,46 @@ router.get('/auth/me', (req, res) => {
 // ---------- Companies ----------
 router.get('/companies', (req, res) => {
   const rows = db.prepare(`SELECT * FROM companies ORDER BY created_at DESC`).all();
-  res.json(rows);
+  // 为每家公司附加实体总览字段：最新注册阶段、付款状态、章程/记账/税务计数
+  const enriched = rows.map(c => {
+    const latestOrder = db.prepare(
+      `SELECT stage, stripe_payment_intent FROM registration_orders WHERE company_id=? ORDER BY created_at DESC LIMIT 1`
+    ).get(c.id);
+    const payment = latestOrder && latestOrder.stripe_payment_intent
+      ? db.prepare(`SELECT status FROM payments WHERE id=?`).get(latestOrder.stripe_payment_intent)
+      : null;
+    const docCount = db.prepare(
+      `SELECT COUNT(*) AS n FROM documents WHERE company_id=? AND kind='constitution'`
+    ).get(c.id).n;
+    const txnCount = db.prepare(
+      `SELECT COUNT(*) AS n FROM transactions WHERE company_id=?`
+    ).get(c.id).n;
+    const taxCount = db.prepare(
+      `SELECT COUNT(*) AS n FROM tax_filings WHERE company_id=?`
+    ).get(c.id).n;
+    return {
+      ...c,
+      latest_stage: latestOrder ? latestOrder.stage : null,
+      payment_status: payment ? payment.status : null,
+      documents_count: docCount,
+      transactions_count: txnCount,
+      tax_filings_count: taxCount
+    };
+  });
+  res.json(enriched);
+});
+
+// PATCH /companies/:id — 更新业务描述 / SSIC / 地址等 (流程图 G2 等关卡使用)
+router.patch('/companies/:id', (req, res) => {
+  const allowed = ['business_description', 'ssic_codes', 'registered_address', 'fye', 'paid_up_capital', 'segment', 'name'];
+  const patch = {};
+  for (const k of allowed) if (req.body && k in req.body) patch[k] = req.body[k];
+  if (Object.keys(patch).length === 0) return res.status(400).json({ error: 'No allowed fields' });
+  const setSql = Object.keys(patch).map(k => `${k}=?`).join(', ');
+  const values = Object.values(patch);
+  db.prepare(`UPDATE companies SET ${setSql} WHERE id=?`).run(...values, req.params.id);
+  const row = db.prepare(`SELECT * FROM companies WHERE id=?`).get(req.params.id);
+  res.json(row);
 });
 
 router.get('/companies/:id', (req, res) => {
@@ -104,14 +147,32 @@ router.post('/registration/orders', (req, res) => {
   const companyId = `co_${uuid().slice(0, 8)}`;
   const userId = body.user_id || 'usr_demo_001';
 
-  db.prepare(`INSERT INTO companies (id,name,status,fye,ssic_codes,paid_up_capital,currency,segment,created_by)
-              VALUES (?,?,?,?,?,?,?,?,?)`).run(
+  // 兼容字符串/数组两种输入形态
+  const ssicArr = Array.isArray(body.ssic_codes) ? body.ssic_codes
+                 : typeof body.ssic_codes === 'string' ? body.ssic_codes.split(',').map(s => s.trim()).filter(Boolean)
+                 : [];
+  const businessDesc = body.business_description
+    || (Array.isArray(body.business_activities) ? body.business_activities.join('; ')
+       : typeof body.business_activities === 'string' ? body.business_activities
+       : null);
+  const capitalAmount = typeof body.paid_up_capital === 'object' && body.paid_up_capital !== null
+    ? (body.paid_up_capital.amount || 1000)
+    : (Number(body.paid_up_capital) || 1000);
+  const capitalCurrency = typeof body.paid_up_capital === 'object' && body.paid_up_capital !== null
+    ? (body.paid_up_capital.currency || 'SGD')
+    : 'SGD';
+
+  db.prepare(`INSERT INTO companies (id,name,status,fye,ssic_codes,paid_up_capital,currency,segment,business_description,activation_status,created_by)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(
     companyId, body.company_name, 'draft',
     body.financial_year_end || '12-31',
-    (body.ssic_codes || []).join(','),
-    body.paid_up_capital?.amount || 1000,
-    body.paid_up_capital?.currency || 'SGD',
-    body.segment || 'local_sg', userId
+    ssicArr.join(','),
+    capitalAmount,
+    capitalCurrency,
+    body.segment || 'local_sg',
+    businessDesc,
+    'draft',
+    userId
   );
 
   (body.shareholders || []).forEach(s => {
@@ -119,8 +180,11 @@ router.post('/registration/orders', (req, res) => {
                 VALUES (?,?,?,?,?,?,?,?,?)`).run(
       `per_${uuid().slice(0, 8)}`, companyId,
       s.is_director ? 'shareholder,director' : 'shareholder',
-      s.type || 'individual', s.name, s.nric_fin || null, s.passport_no || null,
-      s.nationality || 'SGP', s.shares || 0
+      s.type || 'individual',
+      s.full_name || s.name,
+      s.nric_fin || null, s.passport_no || null,
+      s.nationality || 'SGP',
+      s.shares_held || s.shares || 0
     );
   });
 
@@ -135,12 +199,20 @@ router.post('/registration/orders', (req, res) => {
     { stage: 'uen_issued', status: 'pending' },
     { stage: 'completed', status: 'pending' }
   ];
-  db.prepare(`INSERT INTO registration_orders (id,company_id,user_id,stage,progress,price_sgd,timeline)
-              VALUES (?,?,?,?,?,?,?)`).run(
-    orderId, companyId, userId, 'created', 0.125, price, JSON.stringify(timeline)
+
+  // 初始化 9 关门禁 + G1 (命名) 标记 passed (因为订单创建前已经做过 name-check)
+  const gates = sgRegAgent.initGates();
+  const g1Key = Object.keys(gates).find(k => k.startsWith('G1_'));
+  if (g1Key) gates[g1Key] = { status: 'passed', at: new Date().toISOString(), actor: 'system', artifact_id: null };
+
+  db.prepare(`INSERT INTO registration_orders (id,company_id,user_id,stage,progress,price_sgd,timeline,gates,payment_status)
+              VALUES (?,?,?,?,?,?,?,?,?)`).run(
+    orderId, companyId, userId, 'created', 0.125, price,
+    JSON.stringify(timeline), JSON.stringify(gates), 'unpaid'
   );
 
-  res.json({ order_id: orderId, company_id: companyId, stage: 'created', price_sgd: price, timeline });
+  res.json({ order_id: orderId, company_id: companyId, stage: 'created',
+             price_sgd: price, timeline, gates });
 });
 
 router.get('/registration/orders/:id', (req, res) => {
@@ -177,10 +249,16 @@ router.post('/registration/orders/:id/advance', (req, res) => {
     else if (i === idx) { t.status = 'in_progress'; t.at = new Date().toISOString(); }
   });
   if (target === 'completed') {
-    // Issue UEN
+    // Issue UEN + company live
     const uen = `${new Date().getFullYear()}${Math.floor(100000 + Math.random() * 900000)}K`;
-    db.prepare(`UPDATE companies SET uen=?, status='active' WHERE id=?`).run(uen, order.company_id);
+    db.prepare(`UPDATE companies SET uen=?, status='active', activation_status='live' WHERE id=?`)
+      .run(uen, order.company_id);
     timeline.forEach(t => t.status = 'done');
+    // Gate G9 passed
+    const gatesObj = JSON.parse(order.gates || '{}');
+    const g9Key = Object.keys(gatesObj).find(k => k.startsWith('G9_')) || 'G9_uen';
+    gatesObj[g9Key] = { status: 'passed', at: new Date().toISOString(), actor: 'system', artifact_id: uen };
+    db.prepare(`UPDATE registration_orders SET gates=? WHERE id=?`).run(JSON.stringify(gatesObj), req.params.id);
   }
   const progress = Math.min(1, (idx + 1) / stages.length);
   db.prepare(`UPDATE registration_orders SET stage=?, progress=?, timeline=? WHERE id=?`)
@@ -188,21 +266,278 @@ router.post('/registration/orders/:id/advance', (req, res) => {
   res.json({ ok: true, stage: target, progress, timeline });
 });
 
+// Legacy: 保留旧的 /constitution 接口, 但内部改调新引擎
 router.post('/registration/orders/:id/constitution', async (req, res) => {
+  try {
+    const result = await constitutionEngine.generateBundle(req.params.id);
+    res.json({ document_id: result.bundle.json_doc_id,
+               bundle: result.bundle, clauses: result.clauses, validation: result.validation });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ================================================================================
+// REGISTRATION · GATE / FLOW / AI — 新架构
+// ================================================================================
+
+// 1) GET /registration/gates — 返回 9 关定义 (前端画流程图用)
+router.get('/registration/gates', (req, res) => {
+  res.json({ ok: true, gates: sgRegAgent.GATES });
+});
+
+// 2) GET /registration/orders/:id/flow — 返回某订单完整流程状态 (用于流程图渲染)
+router.get('/registration/orders/:id/flow', (req, res) => {
   const order = db.prepare(`SELECT * FROM registration_orders WHERE id=?`).get(req.params.id);
   if (!order) return res.status(404).json({ error: 'Not found' });
   const company = db.prepare(`SELECT * FROM companies WHERE id=?`).get(order.company_id);
-  const shareholders = db.prepare(`SELECT * FROM persons WHERE company_id=?`).all(order.company_id);
-  const constitution = await Promise.resolve(llm.complete({
-    schema: 'constitution',
-    context: { company_name: company.name, capital: company.paid_up_capital, shareholders, business: company.ssic_codes },
-    messages: [{ role: 'user', content: `Draft constitution for ${company.name}` }]
-  }));
-  const docId = `doc_${uuid().slice(0, 8)}`;
-  db.prepare(`INSERT INTO documents (id,company_id,kind,version,generated_by_ai,content)
-              VALUES (?,?,?,?,?,?)`).run(docId, company.id, 'constitution', 1, 1, JSON.stringify(constitution));
-  res.json({ document_id: docId, constitution });
+  const persons = db.prepare(`SELECT * FROM persons WHERE company_id=?`).all(order.company_id);
+  const kycStatus = kycConnector.statusForOrder(order.id);
+  let constitution = null;
+  try { constitution = { bundle: JSON.parse(order.constitution_bundle || 'null') }; } catch { constitution = null; }
+  let gates = {};
+  try { gates = JSON.parse(order.gates || '{}'); } catch { gates = {}; }
+
+  // 对每关做实时 validate, 产出 canAdvance 布尔
+  const gateStates = sgRegAgent.GATES.map(g => {
+    const key = Object.keys(gates).find(k => k.startsWith(g.id + '_')) || (g.id + '_' + g.key);
+    const persisted = gates[key] || { status: 'pending' };
+    const v = sgRegAgent.validateGate(g.id, {
+      order: { ...order, gates },
+      company, persons,
+      kycStatus: kycStatus.ok ? kycStatus : null,
+      constitution,
+      signed: persisted.status === 'passed' && g.id === 'G6' ? true : undefined,
+      bizfileSubmissionId: order.bizfile_submission_id
+    });
+    return {
+      ...g,
+      state_key: key,
+      status: persisted.status,
+      at: persisted.at, artifact_id: persisted.artifact_id,
+      can_advance: v.ok,
+      blocked_reason: v.ok ? null : v.reason
+    };
+  });
+
+  res.json({
+    ok: true,
+    order_id: order.id,
+    company_id: order.company_id,
+    company,
+    persons,
+    payment_status: order.payment_status,
+    paid_at: order.paid_at,
+    stage: order.stage,
+    progress: order.progress,
+    activation_status: company?.activation_status || 'draft',
+    gates: gateStates,
+    constitution_bundle: constitution?.bundle || null,
+    kyc: kycStatus
+  });
 });
+
+// 3) POST /registration/orders/:id/gate/:gateId/advance — 带前置校验地推进某关
+router.post('/registration/orders/:id/gate/:gateId/advance', (req, res) => {
+  const order = db.prepare(`SELECT * FROM registration_orders WHERE id=?`).get(req.params.id);
+  if (!order) return res.status(404).json({ error: 'Not found' });
+  const company = db.prepare(`SELECT * FROM companies WHERE id=?`).get(order.company_id);
+  const persons = db.prepare(`SELECT * FROM persons WHERE company_id=?`).all(order.company_id);
+  const kycStatus = kycConnector.statusForOrder(order.id);
+  let constitution = null;
+  try { constitution = { bundle: JSON.parse(order.constitution_bundle || 'null') }; } catch {}
+  let gates = {};
+  try { gates = JSON.parse(order.gates || '{}'); } catch {}
+
+  const gate = sgRegAgent.GATES.find(g => g.id === req.params.gateId);
+  if (!gate) return res.status(400).json({ error: 'Unknown gate' });
+
+  // 运行校验
+  const v = sgRegAgent.validateGate(gate.id, {
+    order: { ...order, gates }, company, persons,
+    kycStatus: kycStatus.ok ? kycStatus : null,
+    constitution,
+    signed: req.body?.signed === true,
+    bizfileSubmissionId: order.bizfile_submission_id || req.body?.bizfile_submission_id
+  });
+  if (!v.ok) return res.status(400).json({ error: v.reason, blocked_by: v.blocked_by, code: 'GATE_BLOCKED' });
+
+  const key = Object.keys(gates).find(k => k.startsWith(gate.id + '_')) || (gate.id + '_' + gate.key);
+  gates[key] = { status: 'passed', at: new Date().toISOString(), actor: req.body?.actor || 'user',
+                 artifact_id: req.body?.artifact_id || null };
+
+  db.prepare(`UPDATE registration_orders SET gates=? WHERE id=?`).run(JSON.stringify(gates), req.params.id);
+  res.json({ ok: true, gate_id: gate.id, gates });
+});
+
+// 4) POST /registration/ai/business-desc — AI 根据关键词生成业务描述
+router.post('/registration/ai/business-desc', async (req, res) => {
+  const { keywords = '', segment = 'local_sg', target_markets = 'Singapore' } = req.body || {};
+  if (!keywords || keywords.length < 2) {
+    return res.status(400).json({ error: 'Please provide at least 2 characters of keywords' });
+  }
+  try {
+    const prompt = [
+      { role: 'system', content:
+`You are a SG corporate registration copy expert. Given a user's business keywords, produce THREE variants of business description in valid JSON:
+{
+  "short":   "<50字/30词, 一句话>",
+  "medium":  "<100字/60词, 2句>",
+  "detailed":"<220字/130词, 4句, 含目标市场/商业模式/收入来源>",
+  "ssic_suggestions": [
+     { "code": "xxxxx", "title": "...", "rationale": "..." },
+     ...3 个最相关
+  ],
+  "keywords_parsed": [..]
+}
+Requirements:
+- Write in SAME LANGUAGE as the user's keywords (中文输入→中文输出, English→English).
+- Use neutral, factual, ACRA-acceptable wording. No marketing fluff.
+- SSIC codes must be 5-digit SSIC 2020. Only output the JSON, no prose.` },
+      { role: 'user', content: `Keywords: ${keywords}\nSegment: ${segment}\nTarget markets: ${target_markets}` }
+    ];
+    const out = await llmGateway.chat({ purpose: 'agent_plan', messages: prompt, response_format: { type: 'json_object' } });
+    let parsed = null;
+    const text = (out.content || out.text || '').trim();
+    try { parsed = JSON.parse(text); }
+    catch {
+      // 尝试抽取 JSON 块
+      const m = text.match(/\{[\s\S]*\}/);
+      if (m) { try { parsed = JSON.parse(m[0]); } catch {} }
+    }
+    if (!parsed) {
+      // 降级: 模板化
+      parsed = {
+        short: `${keywords} — engaged in ${keywords} business in Singapore.`,
+        medium: `The Company is incorporated in Singapore to carry on the business of ${keywords}. It serves ${target_markets} through a B2B/B2C model.`,
+        detailed: `The Company is incorporated under the Companies Act 1967 to carry on the business of ${keywords}. The Company's principal activities include developing, selling and servicing related products. Target markets include ${target_markets}. Revenue is derived from service fees, subscriptions and project-based contracts.`,
+        ssic_suggestions: [{ code: '62019', title: 'Other information technology and computer service activities', rationale: 'fallback' }],
+        keywords_parsed: String(keywords).split(/[\s,，、;]+/).filter(Boolean)
+      };
+    }
+    res.json({ ok: true, ...parsed, model: out.model, tier: out.tier });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// 5) POST /registration/ai/ssic-recommend — 基于业务描述推荐 SSIC
+router.post('/registration/ai/ssic-recommend', async (req, res) => {
+  const { business_description } = req.body || {};
+  if (!business_description) return res.status(400).json({ error: 'business_description required' });
+  try {
+    const out = await llmGateway.chat({
+      purpose: 'fast',
+      messages: [
+        { role: 'system', content: 'Return STRICT JSON: { primary:{code,title}, secondary:[{code,title},...], license_hint:"..." }. SSIC 2020 5-digit.' },
+        { role: 'user', content: business_description }
+      ],
+      response_format: { type: 'json_object' }
+    });
+    let parsed = null;
+    try { parsed = JSON.parse(out.content || out.text || '{}'); } catch { parsed = null; }
+    if (!parsed) parsed = { primary: { code: '62019', title: 'Other IT services' }, secondary: [], license_hint: null };
+    res.json({ ok: true, ...parsed, model: out.model });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// 6) POST /registration/orders/:id/constitution-bundle — 生成章程三件套 (新接口, 推荐)
+router.post('/registration/orders/:id/constitution-bundle', async (req, res) => {
+  try {
+    const r = await constitutionEngine.generateBundle(req.params.id);
+    // 同时推进 G5 (如果无 blockers)
+    if (r.validation.passed) {
+      const ord = db.prepare(`SELECT gates FROM registration_orders WHERE id=?`).get(req.params.id);
+      let gates = {}; try { gates = JSON.parse(ord.gates || '{}'); } catch {}
+      const key = Object.keys(gates).find(k => k.startsWith('G5_')) || 'G5_constitution';
+      gates[key] = { status: 'passed', at: new Date().toISOString(), actor: 'ai', artifact_id: r.bundle.json_doc_id };
+      db.prepare(`UPDATE registration_orders SET gates=? WHERE id=?`).run(JSON.stringify(gates), req.params.id);
+    }
+    res.json({ ok: true, ...r });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// 7) GET /registration/orders/:id/constitution-bundle — 获取最近一版章程 (三件套)
+router.get('/registration/orders/:id/constitution-bundle', (req, res) => {
+  try {
+    const r = constitutionEngine.getBundle(req.params.id);
+    res.json({ ok: true, ...r });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// 8) GET /documents/:id/download — 下载 doc 内容
+router.get('/documents/:id/download', (req, res) => {
+  const doc = db.prepare(`SELECT * FROM documents WHERE id=?`).get(req.params.id);
+  if (!doc) return res.status(404).json({ error: 'Not found' });
+  const ext = doc.kind.endsWith('_pdf') ? 'pdf' : (doc.kind.endsWith('_docx') ? 'docx' : 'json');
+  res.setHeader('Content-Type', ext === 'pdf' ? 'application/pdf' : ext === 'docx' ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' : 'application/json');
+  res.setHeader('Content-Disposition', `attachment; filename="${doc.id}.${ext}"`);
+  res.send(doc.content || '');
+});
+
+// ================================================================================
+// KYC · 新接口 (基于 kyc-connector 抽象层)
+// ================================================================================
+router.post('/kyc/v2/initiate', async (req, res) => {
+  const { person_id, method = 'singpass' } = req.body || {};
+  try {
+    const r = method === 'singpass'
+      ? await kycConnector.singpassInitiate({ person_id })
+      : await kycConnector.passportInitiate({ person_id });
+    res.json(r);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/kyc/v2/complete', async (req, res) => {
+  try {
+    const r = await kycConnector.complete({ session_id: req.body?.session_id, payload: req.body?.payload || {} });
+    res.json(r);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Mock 回调路径 (用于 mock QR)
+router.get('/kyc/mock/:session_id/complete', async (req, res) => {
+  try {
+    const r = await kycConnector.complete({ session_id: req.params.session_id, payload: req.query });
+    res.json(r);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/kyc/orders/:id/status', (req, res) => {
+  res.json(kycConnector.statusForOrder(req.params.id));
+});
+
+// KYC 配置 (admin)
+router.get('/admin/kyc/config', (req, res) => res.json(kycConnector.getConfig()));
+router.post('/admin/kyc/config', (req, res) => res.json(kycConnector.setConfig(req.body || {})));
+
+// ================================================================================
+// BILLING · 付费门禁接口
+// ================================================================================
+router.post('/billing/orders/:id/checkout', async (req, res) => {
+  try { res.json(await billingGate.checkoutOrder(req.params.id)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/billing/orders/:id/mock-pay', (req, res) => {
+  const order = db.prepare(`SELECT * FROM registration_orders WHERE id=?`).get(req.params.id);
+  if (!order) return res.status(404).json({ error: 'Order not found' });
+  if (!order.stripe_payment_intent) return res.status(400).json({ error: 'Call /checkout first' });
+  res.json(billingGate.markPaid(req.params.id, order.stripe_payment_intent));
+});
+
+router.get('/billing/companies/:id/status', (req, res) => {
+  res.json(billingGate.companyActivationStatus(req.params.id));
+});
+
+router.get('/admin/billing/config', (req, res) => res.json(billingGate.getConfig()));
+router.post('/admin/billing/config', (req, res) => res.json(billingGate.setConfig(req.body || {})));
 
 // ---------- KYC ----------
 router.post('/kyc/initiate', (req, res) => {
@@ -232,7 +567,7 @@ router.post('/kyc/complete', (req, res) => {
 });
 
 // ---------- Bookkeeping ----------
-router.get('/books/transactions', (req, res) => {
+router.get('/books/transactions', billingGate.requirePaid('bookkeeping'), (req, res) => {
   const { company_id, limit = 100 } = req.query;
   let q = `SELECT * FROM transactions`;
   const params = [];
@@ -242,7 +577,7 @@ router.get('/books/transactions', (req, res) => {
   res.json(db.prepare(q).all(...params));
 });
 
-router.post('/books/transactions/import', upload.single('file'), (req, res) => {
+router.post('/books/transactions/import', billingGate.requirePaid('bookkeeping'), upload.single('file'), (req, res) => {
   const { company_id, bank_code = 'DBS' } = req.body || {};
   if (!company_id) return res.status(400).json({ error: 'company_id required' });
 
@@ -286,7 +621,7 @@ router.post('/books/transactions/import', upload.single('file'), (req, res) => {
   res.json({ imported, bank_code, duplicates_skipped: 0, parse_errors: 0 });
 });
 
-router.post('/books/invoices/ocr', async (req, res) => {
+router.post('/books/invoices/ocr', billingGate.requirePaid('bookkeeping'), async (req, res) => {
   const { company_id, hint_vendor } = req.body || {};
   const result = await Promise.resolve(llm.complete({ schema: 'invoice_ocr', context: { hint_vendor, company_name: hint_vendor }, messages: [{ role: 'user', content: `OCR invoice from ${hint_vendor || 'unknown vendor'}` }] }));
   // Normalize between sim + real LLM field names
@@ -303,13 +638,13 @@ router.post('/books/invoices/ocr', async (req, res) => {
   res.json({ invoice_id: invoiceId, vendor_name, invoice_number, issue_date, ...result });
 });
 
-router.get('/books/invoices', (req, res) => {
+router.get('/books/invoices', billingGate.requirePaid('bookkeeping'), (req, res) => {
   const { company_id } = req.query;
   const rows = db.prepare(`SELECT * FROM invoices WHERE company_id=? ORDER BY issue_date DESC`).all(company_id || '');
   res.json(rows);
 });
 
-router.post('/books/journals/auto', async (req, res) => {
+router.post('/books/journals/auto', billingGate.requirePaid('bookkeeping'), async (req, res) => {
   const { company_id, transaction_id } = req.body || {};
   const txn = db.prepare(`SELECT * FROM transactions WHERE id=?`).get(transaction_id);
   if (!txn) return res.status(404).json({ error: 'Transaction not found' });
@@ -334,7 +669,7 @@ router.post('/books/journals/auto', async (req, res) => {
   res.json({ journal_id: journalId, ...entry, lines });
 });
 
-router.get('/books/journals', (req, res) => {
+router.get('/books/journals', billingGate.requirePaid('bookkeeping'), (req, res) => {
   const { company_id, status } = req.query;
   let q = `SELECT * FROM journal_entries WHERE company_id=?`;
   const params = [company_id || ''];
@@ -345,12 +680,12 @@ router.get('/books/journals', (req, res) => {
   res.json(rows);
 });
 
-router.post('/books/journals/:id/approve', (req, res) => {
+router.post('/books/journals/:id/approve', billingGate.requirePaid('bookkeeping'), (req, res) => {
   db.prepare(`UPDATE journal_entries SET review_status='approved' WHERE id=?`).run(req.params.id);
   res.json({ ok: true });
 });
 
-router.get('/books/reports/:month', (req, res) => {
+router.get('/books/reports/:month', billingGate.requirePaid('bookkeeping'), (req, res) => {
   const { company_id } = req.query;
   const month = req.params.month;
   const txns = db.prepare(`SELECT * FROM transactions WHERE company_id=? AND transaction_date LIKE ?`)
@@ -376,7 +711,7 @@ router.get('/books/chart-of-accounts', (req, res) => {
 });
 
 // ---------- Tax ----------
-router.post('/tax/eci/compute', async (req, res) => {
+router.post('/tax/eci/compute', billingGate.requirePaid('tax'), async (req, res) => {
   const { company_id, revenue, expenses, sutr_eligible = true } = req.body || {};
   const company = db.prepare(`SELECT * FROM companies WHERE id=?`).get(company_id || '') || { fye: '12-31', name: 'Demo Co' };
   const result = await Promise.resolve(llm.complete({
@@ -394,7 +729,7 @@ router.post('/tax/eci/compute', async (req, res) => {
   res.json({ filing_id: filingId, ...result });
 });
 
-router.post('/tax/form-cs/draft', async (req, res) => {
+router.post('/tax/form-cs/draft', billingGate.requirePaid('tax'), async (req, res) => {
   const { company_id, ya } = req.body || {};
   const result = await orchestrator.TOOLS.form_cs_draft({ company_id, ya: ya || new Date().getFullYear() + 1 });
   res.json(result.result);
@@ -507,7 +842,7 @@ router.get('/payroll/ir8a', (req, res) => {
 // ================================================================================
 // GST F5 Quarterly Return
 // ================================================================================
-router.get('/tax/gst/f5', (req, res) => {
+router.get('/tax/gst/f5', billingGate.requirePaid('tax'), (req, res) => {
   const { company_id, from = '2025-09-01', to = '2025-11-30' } = req.query;
   res.json(finance.gstF5({ company_id, from, to }));
 });
@@ -806,6 +1141,15 @@ router.get('/rag/ai-build/status', (req, res) => {
     file_ingest_ready: fileIngest.isReady(),
     rag: { total_docs: byLayer.reduce((s, r) => s + r.n, 0), by_layer: byLayer, ai_generated: aiGen, uploaded }
   });
+});
+
+// ---------- AI Chat 引擎清单 (前端/管理端显示 "⚡ 引擎/📚 规则/🛠 skills/🚧 边界") ----------
+router.get('/chat/manifest', (req, res) => {
+  try {
+    res.json({ ok: true, manifest: aiChat.getManifest() });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
 });
 
 // ---------- 文件上传统一入口 ----------

@@ -119,7 +119,7 @@
     {
       "name": "生成 token 200",
       "ok": true,
-      "extra": "token=UP-0498560F29"
+      "extra": "token=UP-15E534E094"
     },
     {
       "name": "token 锁定 company_id",
@@ -142,7 +142,7 @@
     {
       "name": "档案中至少 1 张发票带 image_url",
       "ok": true,
-      "extra": "count=3"
+      "extra": "count=6"
     },
     {
       "name": "image_url 文件可下载 (200)",
@@ -156,9 +156,9 @@
     {
       "name": "history.wa_messages 有带文件路径的消息",
       "ok": true,
-      "extra": "count=3"
+      "extra": "count=6"
     }
   ],
   "base": "http://localhost:3000",
-  "timestamp": "2026-05-03T14:52:13.694Z"
+  "timestamp": "2026-05-03T17:14:35.388Z"
 }

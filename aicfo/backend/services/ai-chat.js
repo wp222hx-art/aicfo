@@ -9,6 +9,7 @@
 // ================================================================================
 const gateway = require('./llm-gateway');
 const rag = require('../../rag/engine');
+const sgReg = require('./sg-reg-agent');
 
 function client() {
   if (process.env.AICFO_LLM_OFFLINE === '1') return null;
@@ -17,7 +18,7 @@ function client() {
 
 function isReady() { return gateway.isReady(); }
 
-const SYSTEM_PROMPT = `你是 AiCFO（新加坡企业大脑）的持牌 CSP/CFO 助手。
+const BASE_SYSTEM_PROMPT = `你是 AiCFO（新加坡企业大脑）的持牌 CSP/CFO 助手，运行在 **最强推理 (reasoning)** 模型上。
 回答必须严格基于新加坡本地法规：
 - Companies Act 1967（注册、AGM、AR、决议、章程）
 - Income Tax Act 1947（公司税率 17%、SUTE 首 3 年免税：首 10 万 75% 免 + 次 10 万 50% 免；PTE 首 1 万 75% + 次 19 万 50%；ECI 截止 FYE+3 个月；Form C-S 截止 11/30）
@@ -33,6 +34,9 @@ const SYSTEM_PROMPT = `你是 AiCFO（新加坡企业大脑）的持牌 CSP/CFO 
 4. 涉及法律不确定性或跨境复杂问题，在末尾添加一行：
    "⚠ 建议升级至持牌 CSP / MAS 认可律师复核（置信度 <0.8）。"
 5. 回答长度控制在 6 段以内，重点列表化。`;
+
+// 合并基础 Prompt + 新加坡注册规则 Agent (15 规则 + 7 步工作流 + 10 skills + 边界)
+const SYSTEM_PROMPT = `${BASE_SYSTEM_PROMPT}\n\n${sgReg.PROMPT_BLOCK}`;
 
 /**
  * 带 RAG 检索的对话
@@ -77,11 +81,13 @@ async function chatWithRAG({ message, company_id = null, history = [], layers, m
   msgs.push({ role: 'user', content: message });
 
   // 3. 调真实模型（通过统一网关 → Tokenhot / OpenAI 兼容后端）
+  //    强制走 reasoning tier (最强推理) — 装载了完整 SG 注册规则 Agent 和 10 个 skill，必须用最强模型
+  const forcedTier = arguments[0]?.tier || 'reasoning';
   const r = await gateway.chat({
     messages: msgs,
     purpose: 'chat',
     model,          // 上游显式指定时优先
-    tier: arguments[0]?.tier   // 支持前端传 tier=reasoning/fast
+    tier: forcedTier
   });
   const reply = r.content || '（无返回内容）';
 
@@ -93,4 +99,32 @@ async function chatWithRAG({ message, company_id = null, history = [], layers, m
   };
 }
 
-module.exports = { chatWithRAG, isReady };
+// 暴露给前端/管理端的清单，用来在对话入口显示 "⚡ 引擎 / 📚 规则 / 🛠 skills / 🚧 边界"
+function getManifest() {
+  const cfg = gateway.getConfig();
+  const tier = (cfg.tier_by_purpose && cfg.tier_by_purpose.chat) || 'reasoning';
+  const model = (cfg.models || {})[tier] || null;
+  return {
+    ready: gateway.isReady(),
+    engine: {
+      provider: cfg.provider,
+      tier,                               // 预期 'reasoning'
+      model,                              // 例如 'claude-opus-4.7'
+      purpose: 'chat',
+      forced_min_tier: 'reasoning'
+    },
+    domain: {
+      name: 'SG Company Registration Agent',
+      version: 'v1',
+      rules_count:    sgReg.RULES.length,
+      workflow_steps: sgReg.WORKFLOW.length,
+      skills_count:   sgReg.SKILLS.length
+    },
+    rules:    sgReg.RULES,
+    workflow: sgReg.WORKFLOW,
+    skills:   sgReg.SKILLS,
+    boundary: sgReg.BOUNDARY
+  };
+}
+
+module.exports = { chatWithRAG, isReady, getManifest };

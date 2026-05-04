@@ -791,24 +791,101 @@ window.doRetrieve = async () => {
 // ================================================================================
 async function companies() {
   const list = await api('/companies');
+  const activationBadge = (s) => {
+    const m = { draft: ['warning', '草稿'], paid: ['info', '已付费'], live: ['success', '运营中'] };
+    const [cls, label] = m[s] || ['secondary', s || '—'];
+    return `<span class="badge badge-${cls}">${label}</span>`;
+  };
+  const stageBadge = (s) => {
+    if (!s) return '<span class="muted small">—</span>';
+    const m = {
+      created: ['secondary', '🆕 创建'],
+      kyc: ['info', '🧪 KYC'],
+      constitution: ['info', '📜 章程'],
+      signed: ['info', '✍️ 已签'],
+      reviewing: ['warning', '👁️ 审核'],
+      paid: ['info', '💳 已付'],
+      bizfile: ['warning', '📤 Bizfile'],
+      completed: ['success', '✅ 完成']
+    };
+    const [cls, label] = m[s] || ['secondary', s];
+    return `<span class="badge badge-${cls}">${label}</span>`;
+  };
   $('#av').innerHTML = `
-    <h1 class="view-title">${t('admin.companies.title')}</h1>
-    <p class="view-sub">${t('admin.companies.sub')}</p>
+    <div class="flex-between mb-20">
+      <div>
+        <h1 class="view-title">🏢 实体总览 (Entity Overview)</h1>
+        <p class="view-sub">每家公司作为独立实体：注册阶段 → 付费状态 → 记账/税务/归档进度统一可视</p>
+      </div>
+      <button class="btn" onclick="anav('companies')">🔄 刷新</button>
+    </div>
+
+    <div class="grid grid-4 mb-20">
+      <div class="card stat-card"><div class="stat-label">公司总数</div><div class="stat-value">${list.length}</div></div>
+      <div class="card stat-card"><div class="stat-label">已激活 (Live)</div><div class="stat-value" style="color:var(--success)">${list.filter(c => c.activation_status === 'live').length}</div></div>
+      <div class="card stat-card"><div class="stat-label">已付费待激活</div><div class="stat-value" style="color:var(--info)">${list.filter(c => c.activation_status === 'paid').length}</div></div>
+      <div class="card stat-card"><div class="stat-label">注册中 (Draft)</div><div class="stat-value" style="color:var(--warning)">${list.filter(c => (c.activation_status || 'draft') === 'draft').length}</div></div>
+    </div>
+
     <div class="card">
+      <div class="flex-between mb-12">
+        <h2 style="margin:0">📋 实体清单</h2>
+        <div class="small muted">每行代表一家独立运营的公司实体</div>
+      </div>
       <div class="table-wrap"><table>
-        <thead><tr><th>UEN</th><th>${t('common.name')}</th><th>${t('common.status')}</th><th>${t('admin.companies.segment')}</th><th>FYE</th><th>${t('admin.companies.tier')}</th><th>${t('admin.companies.created')}</th></tr></thead>
-        <tbody>${list.map(c => `
+        <thead>
           <tr>
-            <td class="mono small">${c.uen || '—'}</td>
-            <td><strong>${esc(c.name)}</strong></td>
-            <td><span class="badge badge-${c.status === 'active' ? 'success' : 'warning'}">${c.status}</span></td>
-            <td>${c.segment}</td>
-            <td>${c.fye}</td>
-            <td>${c.subscription_tier}</td>
-            <td class="small muted">${new Date(c.created_at).toLocaleDateString()}</td>
-          </tr>`).join('')}
+            <th>公司 / UEN</th>
+            <th>激活状态</th>
+            <th>注册阶段</th>
+            <th>付款</th>
+            <th>章程</th>
+            <th>记账</th>
+            <th>税务</th>
+            <th>套餐</th>
+            <th>创建时间</th>
+          </tr>
+        </thead>
+        <tbody>${(list || []).map(c => {
+          const paid = c.payment_status === 'succeeded' ? '<span class="badge badge-success">已付</span>' :
+                       c.payment_status === 'pending' ? '<span class="badge badge-warning">待付</span>' :
+                       '<span class="muted small">—</span>';
+          const consti = (c.documents_count || 0) > 0
+            ? `<span class="badge badge-info">${c.documents_count} 份</span>`
+            : '<span class="muted small">—</span>';
+          const books = (c.transactions_count || 0) > 0
+            ? `<span class="badge badge-success">${c.transactions_count} 笔</span>`
+            : '<span class="muted small">—</span>';
+          const tax = (c.tax_filings_count || 0) > 0
+            ? `<span class="badge badge-info">${c.tax_filings_count} 份</span>`
+            : '<span class="muted small">—</span>';
+          return `
+            <tr>
+              <td>
+                <div><strong>${esc(c.name)}</strong></div>
+                <div class="mono small muted">${c.uen || '未分配'}</div>
+              </td>
+              <td>${activationBadge(c.activation_status || 'draft')}</td>
+              <td>${stageBadge(c.latest_stage)}</td>
+              <td>${paid}</td>
+              <td>${consti}</td>
+              <td>${books}</td>
+              <td>${tax}</td>
+              <td>${c.subscription_tier || 'basic'}</td>
+              <td class="small muted">${new Date(c.created_at).toLocaleDateString()}</td>
+            </tr>`;
+        }).join('')}
         </tbody>
       </table></div>
+    </div>
+
+    <div class="card mt-20">
+      <h3 style="margin-top:0">🔄 逻辑说明</h3>
+      <div class="small muted" style="line-height:1.8">
+        <div>• <strong>Draft</strong>：已创建订单，但尚未完成付款，仅可走注册流程图的各个 Gate（命名 → SSIC → 股本 → KYC → 章程 → 签名）</div>
+        <div>• <strong>Paid</strong>：Stripe 付款成功后进入，解锁记账 / 税务 / 报表模块，同时继续走 Bizfile 提交流程</div>
+        <div>• <strong>Live</strong>：ACRA 通过、UEN 下发后自动激活，所有模块可全功能使用</div>
+      </div>
     </div>`;
   if (window.I18N) window.I18N.applyDOM();
 }

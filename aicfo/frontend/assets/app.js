@@ -2,10 +2,15 @@
 const API = '/api';
 const state = {
   user: null,
-  company: null,
+  company: null,          // active company (legacy alias)
+  companies: [],          // all companies owned by user
+  activeCompanyId: null,  // id of the company currently in focus
   route: 'dashboard',
   session_id: null
 };
+// Restore last selected company
+try { state.activeCompanyId = localStorage.getItem('aicfo_active_company') || null; } catch(e) {}
+window.state = state;
 // i18n shorthand
 const t = (k, vars) => (window.I18N ? window.I18N.t(k, vars) : k);
 
@@ -43,27 +48,93 @@ function nav(route, params = {}) {
   state.route = route;
   state.params = params;
   document.querySelectorAll('.nav a').forEach(a => a.classList.toggle('active', a.dataset.route === route));
-  const routes = { dashboard: viewDashboard, register: viewRegister, books: viewBooks, reports: viewReports, monthly: viewMonthly, tax: viewTax, secretary: viewSecretary, chat: viewChat, pricing: viewPricing, order: viewOrder, signup: viewSignup, plans: viewPlans, wa: viewWaChannel, myArchive: viewMyArchive, myArchiveDetail: viewMyArchiveDetail };
+  const routes = { dashboard: viewDashboard, register: viewRegister, regFlow: viewRegFlow, books: viewBooks, reports: viewReports, monthly: viewMonthly, tax: viewTax, secretary: viewSecretary, chat: viewChat, pricing: viewPricing, order: viewOrder, signup: viewSignup, plans: viewPlans, wa: viewWaChannel, myArchive: viewMyArchive, myArchiveDetail: viewMyArchiveDetail };
   const fn = routes[route] || viewDashboard;
   fn(params);
   window.scrollTo(0, 0);
 }
 window.nav = nav;
 
+// ---------- Company Switcher ----------
+async function refreshCompanies() {
+  try {
+    const all = await api('/companies');
+    state.companies = all.filter(c => !state.user || c.created_by === state.user.id);
+    if (state.companies.length === 0) state.companies = all;
+    // resolve active company
+    let active = null;
+    if (state.activeCompanyId) active = state.companies.find(c => c.id === state.activeCompanyId);
+    if (!active) active = state.companies[0] || null;
+    state.company = active;
+    state.activeCompanyId = active?.id || null;
+    try { if (state.activeCompanyId) localStorage.setItem('aicfo_active_company', state.activeCompanyId); } catch(e) {}
+    renderCompanySwitcher();
+  } catch (e) { console.warn('refreshCompanies failed', e); }
+}
+window.refreshCompanies = refreshCompanies;
+
+function renderCompanySwitcher() {
+  const mount = document.querySelector('#companySwitcher');
+  if (!mount) return;
+  if (!state.companies || state.companies.length === 0) {
+    mount.innerHTML = `<button class="btn btn-sm btn-primary" onclick="nav('register')">${t('switcher.register_first') || '+ 注册第一家公司'}</button>`;
+    return;
+  }
+  const opts = state.companies.map(c => {
+    const badge = c.activation_status === 'live'  ? '🟢'
+                : c.activation_status === 'paid'  ? '🟡'
+                : '⚪';
+    const uen = c.uen ? `· ${c.uen}` : '';
+    return `<option value="${c.id}" ${c.id===state.activeCompanyId?'selected':''}>${badge} ${esc(c.name)} ${uen}</option>`;
+  }).join('');
+  mount.innerHTML = `
+    <div class="company-switcher">
+      <span class="cs-label">🏢</span>
+      <select onchange="switchCompany(this.value)" title="切换公司 / Switch company">${opts}</select>
+      <button class="btn btn-xs" onclick="nav('register')" title="新注册一家公司">+</button>
+    </div>`;
+}
+
+window.switchCompany = (id) => {
+  state.activeCompanyId = id;
+  state.company = state.companies.find(c => c.id === id) || state.company;
+  try { localStorage.setItem('aicfo_active_company', id); } catch(e) {}
+  // re-render current view
+  if (state.route) nav(state.route, state.params || {});
+};
+
 // ---------- Init ----------
 (async () => {
   try {
     const { user } = await api('/auth/login', { method: 'POST', body: { email: 'james@skyhawk.sg' } });
     state.user = user;
-    const companies = await api('/companies');
-    state.company = companies.find(c => c.created_by === user.id) || companies[0];
+    await refreshCompanies();
     $('#userName').textContent = user.name;
     $('#userRole').textContent = state.company ? state.company.name : 'No company yet';
   } catch (e) {
     console.warn('Auth failed, running anonymously', e);
   }
-  nav('dashboard');
+  // Route from hash (if user opens /#/regFlow?order=xxx)
+  const hash = location.hash.replace(/^#\/?/, '');
+  if (hash) {
+    const [route, qs] = hash.split('?');
+    const params = {};
+    (qs || '').split('&').filter(Boolean).forEach(kv => { const [k,v] = kv.split('='); params[k] = decodeURIComponent(v || ''); });
+    nav(route || 'dashboard', params);
+  } else {
+    nav('dashboard');
+  }
 })();
+
+// hashchange support
+window.addEventListener('hashchange', () => {
+  const hash = location.hash.replace(/^#\/?/, '');
+  if (!hash) return;
+  const [route, qs] = hash.split('?');
+  const params = {};
+  (qs || '').split('&').filter(Boolean).forEach(kv => { const [k,v] = kv.split('='); params[k] = decodeURIComponent(v || ''); });
+  nav(route || 'dashboard', params);
+});
 
 // ================================================================================
 // DASHBOARD
@@ -253,27 +324,104 @@ function step2Business() {
   $('#wizardBody').innerHTML = `
     <h2>${t('reg.step2.title')}</h2>
     <p class="muted mb-16">${t('reg.step2.sub')}</p>
-    <div class="form-row">
+
+    <div class="ai-assist-box">
+      <div class="ai-assist-head">
+        <span class="ai-badge">✨ AI 业务描述生成器</span>
+        <span class="muted small">输入关键词 → AI 自动生成 3 段描述 + 推荐 SSIC</span>
+      </div>
+      <div class="inline-row">
+        <input id="bizKeywords" placeholder="例：跨境电商 · 东南亚 · 服装批发" />
+        <button class="btn btn-primary" onclick="aiGenBizDesc()">🪄 一键生成</button>
+      </div>
+      <div id="aiBizOut" class="mt-12"></div>
+    </div>
+
+    <div class="form-row mt-16">
       <label>${t('reg.step2.desc')}</label>
-      <textarea id="bizDesc" rows="4" placeholder="${t('reg.step2.desc_ph')}">${registerState.business || ''}</textarea>
+      <textarea id="bizDesc" rows="5" placeholder="${t('reg.step2.desc_ph')}">${registerState.business || ''}</textarea>
+      <div class="muted small mt-4">将作为章程 Objects 条款与 ACRA 业务描述提交</div>
     </div>
-    <div class="form-row">
-      <label>${t('reg.step2.capital')}</label>
-      <input id="capital" type="number" value="${registerState.capital || 1000}" min="1" />
+    <div class="inline-row">
+      <div class="form-row">
+        <label>${t('reg.step2.capital')} (SGD)</label>
+        <input id="capital" type="number" value="${registerState.capital || 1000}" min="1" />
+      </div>
+      <div class="form-row">
+        <label>${t('reg.step2.fye')}</label>
+        <select id="fye">
+          <option value="12-31">31 December</option>
+          <option value="03-31">31 March</option>
+          <option value="06-30">30 June</option>
+        </select>
+      </div>
     </div>
-    <div class="form-row">
-      <label>${t('reg.step2.fye')}</label>
-      <select id="fye">
-        <option value="12-31">31 December</option>
-        <option value="03-31">31 March</option>
-        <option value="06-30">30 June</option>
-      </select>
-    </div>
-    <div class="flex">
+    <div id="ssicSuggestOut"></div>
+    <div class="flex mt-16">
       <button class="btn" onclick="registerState.step=0;renderWizard()">${t('common.back')}</button>
       <button class="btn btn-primary" onclick="saveBusiness()">${t('common.continue')}</button>
     </div>`;
 }
+window.aiGenBizDesc = async () => {
+  const kw = ($('#bizKeywords').value || '').trim();
+  if (!kw || kw.length < 2) return alert('请至少输入 2 个字符的关键词');
+  const out = $('#aiBizOut');
+  out.innerHTML = '<div class="spinner-row"><span class="spinner"></span> AI 正在分析关键词 & 生成 3 段描述... (reasoning tier, 5-15 秒)</div>';
+  try {
+    const r = await api('/registration/ai/business-desc', {
+      method: 'POST', body: { keywords: kw, segment: registerState.segment || 'local_sg' }
+    });
+    if (!r.ok) throw new Error(r.error || 'AI failed');
+    registerState.aiDesc = r;
+    out.innerHTML = `
+      <div class="ai-variants">
+        <div class="variant" onclick="pickBizDesc('short')">
+          <div class="v-head"><strong>简短版</strong><span class="badge badge-info">~50字</span></div>
+          <div class="v-body">${esc(r.short || '')}</div>
+        </div>
+        <div class="variant selected" onclick="pickBizDesc('medium')">
+          <div class="v-head"><strong>标准版 · 推荐</strong><span class="badge badge-success">~100字</span></div>
+          <div class="v-body">${esc(r.medium || '')}</div>
+        </div>
+        <div class="variant" onclick="pickBizDesc('detailed')">
+          <div class="v-head"><strong>详细版</strong><span class="badge badge-info">~220字</span></div>
+          <div class="v-body">${esc(r.detailed || '')}</div>
+        </div>
+      </div>
+      <div class="muted small mt-8">点击任一段 → 写入下方 "业务描述" 文本框。Powered by ${esc(r.model || 'AI')}</div>`;
+    // default pick medium
+    pickBizDesc('medium');
+    // render ssic suggestions
+    if (r.ssic_suggestions && r.ssic_suggestions.length) {
+      $('#ssicSuggestOut').innerHTML = `
+        <div class="ssic-suggest mt-16">
+          <div class="small mb-8"><strong>🏷️ 推荐 SSIC (SSIC 2020 · 5 位代码)</strong></div>
+          <div class="pill-group">
+            ${r.ssic_suggestions.map((s,i) => `
+              <div class="ssic-pill ${i===0?'primary':''}" onclick="pickSSIC('${esc(s.code)}','${esc(s.title||'')}')">
+                <span class="ssic-code">${esc(s.code)}</span>
+                <span class="ssic-title">${esc(s.title || '')}</span>
+                ${i===0?'<span class="pill-badge">主营</span>':''}
+              </div>`).join('')}
+          </div>
+        </div>`;
+    }
+  } catch(e) {
+    out.innerHTML = `<div class="badge badge-danger">AI 生成失败：${esc(e.message)}</div>`;
+  }
+};
+window.pickBizDesc = (which) => {
+  const r = registerState.aiDesc || {};
+  $('#bizDesc').value = r[which] || '';
+  document.querySelectorAll('.ai-variants .variant').forEach((el, i) => {
+    el.classList.toggle('selected', ['short','medium','detailed'][i] === which);
+  });
+};
+window.pickSSIC = (code, title) => {
+  registerState.ssic_primary = { code, title };
+  document.querySelectorAll('.ssic-pill').forEach(el => el.classList.remove('selected'));
+  event?.currentTarget?.classList.add('selected');
+};
 window.saveBusiness = () => {
   registerState.business = $('#bizDesc').value;
   registerState.capital = parseInt($('#capital').value);
@@ -361,12 +509,17 @@ function step5Constitution() {
   $('#wizardBody').innerHTML = `
     <h2>${t('reg.step5.title')}</h2>
     <p class="muted mb-16">${t('reg.step5.sub')}</p>
-    <button class="btn btn-primary" onclick="genConstitution()">${t('reg.step5.gen')}</button>
+    <div class="constitution-intro">
+      <div class="ci-card"><div class="ci-icon">📄</div><div><strong>JSON 结构化</strong><div class="muted small">22 条 clauses + 偏离清单</div></div></div>
+      <div class="ci-card"><div class="ci-icon">📝</div><div><strong>DOCX 可签署</strong><div class="muted small">Word 文档供电子签名</div></div></div>
+      <div class="ci-card"><div class="ci-icon">📑</div><div><strong>PDF 终稿</strong><div class="muted small">提交 ACRA 的终稿</div></div></div>
+    </div>
+    <button class="btn btn-primary mt-16" onclick="genConstitution()">🪄 ${t('reg.step5.gen')}</button>
     <div id="constOut" class="mt-16"></div>
   `;
 }
 window.genConstitution = async () => {
-  $('#constOut').innerHTML = `<div class="muted">${t('common.generating')}</div>`;
+  $('#constOut').innerHTML = `<div class="spinner-row"><span class="spinner"></span> AI 正在调用 Constitution Engine (章程引擎)：采集 → 校验 R01..R15 → 起草 → 融合 Model Constitution → 三件套渲染 ...</div>`;
   // Create order first if not yet
   if (!registerState.order) {
     const r = await api('/registration/orders', {
@@ -374,7 +527,8 @@ window.genConstitution = async () => {
       body: {
         company_name: registerState.name,
         business_activities: [registerState.business],
-        ssic_codes: ['62011', '62021'],
+        business_description: registerState.business,
+        ssic_codes: registerState.ssic_primary ? [registerState.ssic_primary.code] : ['62019'],
         financial_year_end: registerState.fye,
         paid_up_capital: { amount: registerState.capital, currency: 'SGD' },
         shareholders: registerState.shareholders,
@@ -383,21 +537,337 @@ window.genConstitution = async () => {
     });
     registerState.order = r;
   }
-  const r2 = await api('/registration/orders/' + registerState.order.order_id + '/constitution', { method: 'POST' });
-  const c = r2.constitution;
-  $('#constOut').innerHTML = `
-    <div class="card" style="background:var(--surface-2)">
-      <div class="flex-between mb-12"><strong>Constitution · ${esc(registerState.name)}</strong><span class="badge badge-success">${t('reg.step5.ai_gen')}</span></div>
-      <div class="mb-12"><strong>${t('reg.step5.key_clauses')}</strong>
-        <ul style="margin-left:18px;margin-top:6px">${c.summary.map(s => `<li class="small">${esc(s)}</li>`).join('')}</ul>
+  // Call new constitution-bundle endpoint
+  const r2 = await api('/registration/orders/' + registerState.order.order_id + '/constitution-bundle', { method: 'POST' });
+  renderConstitutionBundle(r2, registerState.order.order_id);
+  return;
+};
+
+// Render constitution bundle (shared with flow page)
+function renderConstitutionBundle(r2, orderId) {
+  const b = r2.bundle || {};
+  const clauses = r2.clauses || [];
+  const validation = r2.validation || { deviations: [], blockers: [] };
+  const deviations = b.deviations || validation.deviations || [];
+  const blockers = b.blockers || validation.blockers || [];
+  const treeHtml = clauses.map((c, i) => `
+    <div class="clause-row" onclick="document.getElementById('clause-${c.id}').scrollIntoView({behavior:'smooth',block:'center'})">
+      <span class="clause-idx">${String(i+1).padStart(2,'0')}</span>
+      <span class="clause-title">${esc(c.title)}</span>
+      ${c.source==='ai_drafted'?'<span class="badge badge-info">AI</span>':''}
+    </div>`).join('');
+  const bodyHtml = clauses.map((c, i) => `
+    <div class="clause-detail" id="clause-${c.id}">
+      <div class="cd-head"><span class="cd-idx">${i+1}.</span><strong>${esc(c.title)}</strong>
+        <span class="muted small">· ${esc(c.law)}</span>
+        ${c.source==='ai_drafted'?'<span class="badge badge-info ml-8">AI 起草</span>':'<span class="badge ml-8">Model</span>'}
       </div>
-      <details><summary class="small" style="cursor:pointer">${t('reg.step5.view_all')}</summary>
-        <div style="max-height:300px;overflow:auto;background:white;padding:14px;border-radius:8px;margin-top:10px">
-          ${Object.entries(c.sections).map(([k, v]) => `<div class="mb-12"><strong class="small">${k.replace(/_/g, ' ')}</strong><div class="small muted">${esc(v)}</div></div>`).join('')}
+      <div class="cd-body">${esc(c.body)}</div>
+    </div>`).join('');
+
+  $('#constOut').innerHTML = `
+    <div class="constitution-bundle">
+      <div class="cb-head">
+        <div><strong>Constitution of ${esc(registerState.name || '—')}</strong>
+          <div class="muted small">版本 v${b.version || 1} · 生成于 ${b.generated_at ? new Date(b.generated_at).toLocaleString() : '—'} · 22 条款</div>
         </div>
-      </details>
-      <button class="btn btn-primary mt-12" onclick="registerState.step=5;renderWizard()">${t('reg.step5.continue')}</button>
+        <div class="cb-downloads">
+          <a class="btn btn-sm" href="/api/documents/${b.json_doc_id}/download" download>📄 JSON</a>
+          <a class="btn btn-sm" href="/api/documents/${b.docx_doc_id}/download" download>📝 DOCX</a>
+          <a class="btn btn-sm" href="/api/documents/${b.pdf_doc_id}/download" download>📑 PDF</a>
+        </div>
+      </div>
+      ${blockers.length ? `
+        <div class="alert alert-danger mt-12">
+          <strong>⛔ ${blockers.length} 条合规阻断</strong>
+          <ul>${blockers.map(x => `<li>[${x.rule}] ${esc(x.msg)}</li>`).join('')}</ul>
+        </div>` : ''}
+      ${deviations.length ? `
+        <div class="alert alert-warning mt-12">
+          <strong>⚠ ${deviations.length} 处偏离 Model Constitution (可继续)</strong>
+          <ul>${deviations.map(x => `<li>[${x.rule}/${x.clause}] ${esc(x.msg)}</li>`).join('')}</ul>
+        </div>` : ''}
+      <div class="cb-layout mt-12">
+        <aside class="cb-tree">
+          <div class="cb-tree-title">章程目录 (22)</div>
+          ${treeHtml}
+        </aside>
+        <section class="cb-content">${bodyHtml}</section>
+      </div>
+      <div class="flex mt-16">
+        <button class="btn" onclick="registerState.step=4;renderWizard()">${t('common.back')}</button>
+        <button class="btn btn-primary" onclick="registerState.step=5;renderWizard()">${t('reg.step5.continue')}</button>
+        ${orderId ? `<button class="btn btn-outline" onclick="nav('regFlow',{order:'${orderId}'})">🗺️ 进入完整流程图</button>` : ''}
+      </div>
     </div>`;
+}
+window.renderConstitutionBundle = renderConstitutionBundle;
+
+// ================================================================================
+// REG FLOW · 完整流程图页 (垂直流程图 + 9 关门禁 + AI 助手 + 付费 + 三件套)
+// ================================================================================
+async function viewRegFlow(params = {}) {
+  const orderId = params.order || registerState.order?.order_id;
+  $('#view').innerHTML = `
+    <div class="flow-head">
+      <a onclick="nav('dashboard')" class="back-link">← Dashboard</a>
+      <h1 class="view-title">🗺️ 注册流程图 <span class="muted">/ Registration Roadmap</span></h1>
+      <p class="view-sub">每一关都有前置条件，完成后自动解锁下一关。所有工件 (章程、KYC、付款收据、UEN) 都挂载到此订单下，形成独立公司档案。</p>
+    </div>
+    <div id="flowBody">
+      <div class="empty-state">
+        <p class="muted">${orderId ? '正在加载订单 <code>'+esc(orderId)+'</code> 的流程状态...' : '请先在 <b>注册向导</b> 完成命名+业务+股东, 订单创建后会自动跳转到本页。'}</p>
+        ${!orderId ? `<button class="btn btn-primary" onclick="nav('register')">🏷️ 开始注册向导</button>` : ''}
+      </div>
+    </div>`;
+  if (!orderId) return;
+  try {
+    const flow = await api('/registration/orders/' + orderId + '/flow');
+    renderFlowBody(flow, orderId);
+  } catch (e) {
+    $('#flowBody').innerHTML = `<div class="alert alert-danger">加载失败: ${esc(e.message)}</div>`;
+  }
+}
+
+function renderFlowBody(flow, orderId) {
+  const gates = flow.gates || [];
+  const company = flow.company || {};
+  const persons = flow.persons || [];
+  const activation = flow.activation_status || 'draft';
+  const payment = flow.payment_status || 'unpaid';
+  const uen = company.uen;
+
+  // 左侧信息 + 右侧流程图
+  const activationBadge = activation === 'live'
+    ? '<span class="badge badge-success">🟢 Live (UEN 已下发)</span>'
+    : activation === 'paid'
+      ? '<span class="badge badge-warning">🟡 Paid (记账解锁)</span>'
+      : '<span class="badge">⚪ Draft (注册中)</span>';
+
+  const passedCount = gates.filter(g => g.status === 'passed').length;
+  const percent = Math.round((passedCount / gates.length) * 100);
+
+  $('#flowBody').innerHTML = `
+    <div class="flow-layout">
+      <aside class="flow-sidebar">
+        <div class="card">
+          <div class="small muted">公司实体 · Entity</div>
+          <h2 style="margin:4px 0 8px">${esc(company.name || '—')}</h2>
+          <div class="flex-between mb-8"><span class="muted">状态</span>${activationBadge}</div>
+          <div class="flex-between mb-8"><span class="muted">UEN</span><strong class="mono">${uen || '—'}</strong></div>
+          <div class="flex-between mb-8"><span class="muted">FYE</span><span>${company.fye || '—'}</span></div>
+          <div class="flex-between mb-8"><span class="muted">股本</span><span>${company.currency || 'SGD'} ${Number(company.paid_up_capital||0).toLocaleString()}</span></div>
+          <div class="flex-between mb-8"><span class="muted">订单</span><code class="mono small">${esc(orderId)}</code></div>
+          <div class="divider"></div>
+          <div class="flex-between mb-4"><span class="muted small">流程进度</span><strong>${passedCount}/${gates.length}</strong></div>
+          <div class="progress"><div class="bar" style="width:${percent}%"></div></div>
+          <div class="muted small mt-4">${percent}% 完成</div>
+        </div>
+        <div class="card mt-12">
+          <h3>💳 付款状态</h3>
+          <div class="flex-between mb-8"><span class="muted">订单付款</span>
+            <span class="badge badge-${payment==='paid'?'success':payment==='processing'?'warning':'muted'}">${payment}</span>
+          </div>
+          ${flow.paid_at ? `<div class="muted small">${new Date(flow.paid_at).toLocaleString()}</div>` : ''}
+          <div class="divider"></div>
+          <div class="small">
+            <div class="${activation!=='draft'?'ok':''}">${activation!=='draft'?'✅':'🔒'} 记账 · Bookkeeping</div>
+            <div class="${activation==='live'?'ok':''}">${activation==='live'?'✅':'🔒'} 税务 · Tax (ECI/Form C-S/GST)</div>
+            <div class="${activation==='live'?'ok':''}">${activation==='live'?'✅':'🔒'} 薪酬 · Payroll/CPF</div>
+          </div>
+        </div>
+        <div class="card mt-12">
+          <h3>👥 股东 &amp; 董事 (${persons.length})</h3>
+          ${persons.map(p => {
+            const kyc = (flow.kyc?.rows || []).find(r => r.person_id === p.id);
+            const kycBadge = kyc?.kyc_status === 'passed'
+              ? '<span class="badge badge-success">KYC ✓</span>'
+              : `<span class="badge">${kyc?.kyc_status || 'not_started'}</span>`;
+            return `<div class="flex-between mb-8"><div>
+              <div>${esc(p.full_name || '—')}</div>
+              <div class="muted small">${p.nationality} · ${p.shares_held||0} shares · ${esc(p.role)}</div>
+            </div>${kycBadge}</div>`;
+          }).join('') || '<div class="muted small">尚未添加股东</div>'}
+        </div>
+      </aside>
+      <section class="flow-track">
+        ${gates.map((g, i) => renderGateCard(g, i, gates.length, orderId, flow)).join('')}
+        ${activation === 'live' ? `
+          <div class="gate-celebrate">
+            <div class="gc-icon">🎉</div>
+            <h2>公司注册完成！</h2>
+            <p class="muted">UEN <strong class="mono">${uen}</strong> 已下发 · 所有财务/税务功能已解锁</p>
+            <div class="flex mt-16">
+              <button class="btn btn-primary" onclick="nav('books')">💼 进入记账</button>
+              <button class="btn" onclick="nav('tax')">💰 税务中心</button>
+              <button class="btn" onclick="nav('myArchive')">📂 公司档案</button>
+            </div>
+          </div>` : ''}
+      </section>
+    </div>
+  `;
+}
+
+function renderGateCard(g, idx, total, orderId, flow) {
+  const isPassed = g.status === 'passed';
+  const isCurrent = !isPassed && g.can_advance;
+  const isLocked  = !isPassed && !g.can_advance;
+  const cls = isPassed ? 'passed' : isCurrent ? 'current' : 'locked';
+  const iconState = isPassed ? '✓' : isCurrent ? '➜' : '🔒';
+
+  let actionHtml = '';
+  if (isPassed) {
+    actionHtml = `<div class="gate-artifact">
+      <span class="muted small">完成于 ${g.at ? new Date(g.at).toLocaleString() : '—'}</span>
+      ${g.artifact_id ? `<code class="mono small">${esc(g.artifact_id)}</code>` : ''}
+    </div>`;
+  } else if (isCurrent) {
+    actionHtml = renderGateAction(g, orderId, flow);
+  } else {
+    actionHtml = `<div class="gate-locked-reason">🔒 前置未完成: <em>${esc(g.blocked_reason || '')}</em></div>`;
+  }
+
+  return `
+    <div class="gate-card ${cls}" data-gate="${g.id}">
+      <div class="gate-rail">
+        <div class="gate-dot">${iconState}</div>
+        ${idx < total - 1 ? '<div class="gate-line"></div>' : ''}
+      </div>
+      <div class="gate-body">
+        <div class="gate-head">
+          <div class="gate-title">
+            <span class="gate-step">第 ${idx+1} 关</span>
+            <h3>${esc(g.title)}</h3>
+          </div>
+          <span class="badge badge-${isPassed?'success':isCurrent?'warning':'muted'}">${isPassed?'已完成':isCurrent?'进行中':'已锁定'}</span>
+        </div>
+        <p class="gate-desc">${esc(g.desc)} · <span class="muted">产出: ${esc(g.output)}</span></p>
+        <div class="gate-action">${actionHtml}</div>
+      </div>
+    </div>`;
+}
+
+function renderGateAction(g, orderId, flow) {
+  switch (g.id) {
+    case 'G2':
+      return `<button class="btn btn-primary" onclick="flowEditBusiness('${orderId}')">📋 补充业务描述 + SSIC (AI 生成)</button>`;
+    case 'G3':
+      return `<button class="btn btn-primary" onclick="flowMarkGate('${orderId}','G3')">✅ 确认股东 &amp; 股本结构</button>`;
+    case 'G4':
+      return `<button class="btn btn-primary" onclick="flowRunAllKyc('${orderId}')">🪪 为所有股东发起 KYC</button>
+        <div class="muted small mt-8">已通过 ${flow.kyc?.passed||0} / ${flow.kyc?.total||0}</div>`;
+    case 'G5':
+      return `<button class="btn btn-primary" onclick="flowGenConstitution('${orderId}')">📜 生成章程三件套 (JSON+DOCX+PDF)</button>`;
+    case 'G6':
+      return `<button class="btn btn-primary" onclick="flowSign('${orderId}')">✍️ 发起电子签名</button>`;
+    case 'G7':
+      return `<button class="btn btn-primary" onclick="flowCheckout('${orderId}')">💳 进入付款 (S$${flow.price_sgd || 388})</button>
+        <div class="muted small mt-8">付款成功 → 自动解锁 G8 并激活记账功能</div>`;
+    case 'G8':
+      return `<button class="btn btn-primary" onclick="flowBizfile('${orderId}')">🏛️ 提交 ACRA Bizfile+</button>`;
+    case 'G9':
+      return `<button class="btn btn-primary" onclick="flowIssueUEN('${orderId}')">🎉 等待 UEN 下发 (模拟)</button>`;
+    default:
+      return '<div class="muted">—</div>';
+  }
+}
+
+// ---- Flow actions ----
+window.flowEditBusiness = async (orderId) => {
+  const kw = prompt('业务关键词 (AI 会生成 3 段描述 + 推荐 SSIC):', '');
+  if (!kw) return;
+  try {
+    const ai = await api('/registration/ai/business-desc', { method: 'POST', body: { keywords: kw } });
+    const desc = ai.medium || ai.short || '';
+    const ssic = ai.ssic_suggestions?.[0]?.code || '62019';
+    // Update company business_description + ssic_codes via raw update
+    const order = await api('/registration/orders/' + orderId);
+    await api('/companies/' + order.company_id, { method: 'PATCH', body: { business_description: desc, ssic_codes: ssic } }).catch(()=>null);
+    // Fallback: call advance gate directly
+    await api('/registration/orders/' + orderId + '/gate/G2/advance', { method: 'POST', body: { actor: 'user', artifact_id: ssic } });
+    alert('✅ 业务描述 + SSIC 已生成：\n\n' + desc.slice(0,140) + '...\n\nSSIC: ' + ssic);
+    viewRegFlow({ order: orderId });
+  } catch (e) { alert('失败: ' + e.message); }
+};
+window.flowMarkGate = async (orderId, gateId) => {
+  try {
+    await api('/registration/orders/' + orderId + '/gate/' + gateId + '/advance', { method: 'POST', body: { actor: 'user' } });
+    viewRegFlow({ order: orderId });
+  } catch(e) { alert('Gate 推进失败: ' + (e.message||e)); }
+};
+window.flowRunAllKyc = async (orderId) => {
+  const flow = await api('/registration/orders/' + orderId + '/flow');
+  const pending = (flow.kyc?.rows || []).filter(r => r.kyc_status !== 'passed');
+  if (pending.length === 0) return viewRegFlow({ order: orderId });
+  for (const row of pending) {
+    const method = row.nationality === 'SGP' ? 'singpass' : 'passport_ocr';
+    const init = await api('/kyc/v2/initiate', { method: 'POST', body: { person_id: row.person_id, method } });
+    await api('/kyc/v2/complete', { method: 'POST', body: { session_id: init.session_id, payload: { name: row.full_name, nationality: row.nationality } } });
+  }
+  // Now try to advance G4
+  try { await api('/registration/orders/' + orderId + '/gate/G4/advance', { method: 'POST', body: { actor: 'user' } }); } catch {}
+  viewRegFlow({ order: orderId });
+};
+window.flowGenConstitution = async (orderId) => {
+  const body = $('#flowBody');
+  body.insertAdjacentHTML('beforeend', '<div id="flowBusy" class="flow-busy"><span class="spinner"></span> 🪄 正在生成章程三件套 (5-15 秒, reasoning tier)...</div>');
+  try {
+    const r = await api('/registration/orders/' + orderId + '/constitution-bundle', { method: 'POST' });
+    $('#flowBusy')?.remove();
+    // 用 modal 显示三件套预览
+    const panel = document.createElement('div');
+    panel.className = 'modal-overlay';
+    panel.innerHTML = `
+      <div class="modal">
+        <div class="modal-head">
+          <h2>📜 章程三件套已生成</h2>
+          <button class="btn btn-sm" onclick="this.closest('.modal-overlay').remove();viewRegFlow({order:'${orderId}'})">✕ 关闭并刷新流程</button>
+        </div>
+        <div class="modal-body"><div id="constOut"></div></div>
+      </div>`;
+    document.body.appendChild(panel);
+    renderConstitutionBundle(r, orderId);
+  } catch (e) {
+    $('#flowBusy')?.remove();
+    alert('章程生成失败: ' + e.message);
+  }
+};
+window.flowSign = async (orderId) => {
+  if (!confirm('模拟电子签名：所有董事/股东将对章程逐条签章，继续？')) return;
+  try {
+    await api('/registration/orders/' + orderId + '/gate/G6/advance', { method: 'POST', body: { signed: true, actor: 'user' } });
+    viewRegFlow({ order: orderId });
+  } catch (e) { alert('签名失败: ' + e.message); }
+};
+window.flowCheckout = async (orderId) => {
+  try {
+    const r = await api('/billing/orders/' + orderId + '/checkout', { method: 'POST' });
+    if (r.already_paid) { alert('已付款'); return viewRegFlow({ order: orderId }); }
+    // MVP: open mock checkout dialog
+    if (confirm('💳 Mock 付款 — 金额 ' + r.currency + ' ' + r.amount + '\n点击「确定」立刻标记为已付款（正式环境会跳 Stripe Checkout）')) {
+      await api('/billing/orders/' + orderId + '/mock-pay', { method: 'POST' });
+      alert('✅ 付款成功！记账功能已解锁');
+      viewRegFlow({ order: orderId });
+    }
+  } catch (e) { alert('付款失败: ' + e.message); }
+};
+window.flowBizfile = async (orderId) => {
+  try {
+    // Use legacy advance (stage based)
+    await api('/registration/orders/' + orderId + '/advance', { method: 'POST', body: { next_stage: 'bizfile' } });
+    const subId = 'BF-' + Math.random().toString(36).slice(2, 10).toUpperCase();
+    await api('/registration/orders/' + orderId + '/gate/G8/advance', { method: 'POST', body: { actor: 'acra', artifact_id: subId, bizfile_submission_id: subId } });
+    alert('✅ Bizfile+ 已递交, submission id = ' + subId);
+    viewRegFlow({ order: orderId });
+  } catch (e) { alert('递交失败: ' + e.message); }
+};
+window.flowIssueUEN = async (orderId) => {
+  try {
+    // legacy "completed" stage triggers UEN auto-issuance + company activation_status=live
+    await api('/registration/orders/' + orderId + '/advance', { method: 'POST', body: { next_stage: 'completed' } });
+    refreshCompanies();
+    viewRegFlow({ order: orderId });
+  } catch (e) { alert('UEN 下发失败: ' + e.message); }
 };
 
 function step6Review() {
@@ -440,7 +910,8 @@ window.submitOrder = async () => {
       body: {
         company_name: registerState.name,
         business_activities: [registerState.business],
-        ssic_codes: ['62011'],
+        business_description: registerState.business,
+        ssic_codes: registerState.ssic_primary ? [registerState.ssic_primary.code] : ['62019'],
         financial_year_end: registerState.fye,
         paid_up_capital: { amount: registerState.capital, currency: 'SGD' },
         shareholders: registerState.shareholders,
@@ -449,13 +920,14 @@ window.submitOrder = async () => {
     });
     registerState.order = r;
   }
-  // Simulate advancing through stages
   const oid = registerState.order.order_id;
-  for (const stage of ['kyc', 'constitution', 'signed', 'reviewing', 'bizfile']) {
-    await api('/registration/orders/' + oid + '/advance', { method: 'POST', body: { next_stage: stage } });
+  // 跳转到新流程图页, 让用户按 9 关逐关推进 (新架构的核心)
+  if (state.activeCompanyId !== registerState.order.company_id) {
+    state.activeCompanyId = registerState.order.company_id;
+    try { localStorage.setItem('aicfo_active_company', state.activeCompanyId); } catch(e) {}
   }
-  alert(t('reg.step6.success', { oid }));
-  nav('order', { id: oid });
+  await refreshCompanies();
+  nav('regFlow', { order: oid });
 };
 
 // ================================================================================

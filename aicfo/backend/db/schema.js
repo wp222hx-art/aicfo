@@ -36,6 +36,8 @@ function init() {
     registered_address TEXT,
     subscription_tier TEXT DEFAULT 'basic',
     segment TEXT DEFAULT 'local_sg', -- local_sg | china_outbound | web3 | family_office
+    activation_status TEXT DEFAULT 'draft', -- draft | paid | live | suspended
+    business_description TEXT,
     created_by TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (created_by) REFERENCES users(id)
@@ -56,6 +58,10 @@ function init() {
     approved_at TEXT,
     completed_at TEXT,
     timeline TEXT DEFAULT '[]', -- JSON
+    gates TEXT DEFAULT '{}',    -- JSON: { G1:{status,at,actor,artifact_id}, ... }
+    paid_at TEXT,
+    payment_status TEXT DEFAULT 'unpaid', -- unpaid | processing | paid | refunded
+    constitution_bundle TEXT,   -- JSON: { docx_doc_id, pdf_doc_id, json_doc_id, deviations, version }
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (company_id) REFERENCES companies(id),
     FOREIGN KEY (user_id) REFERENCES users(id)
@@ -504,6 +510,21 @@ function init() {
   CREATE INDEX IF NOT EXISTS idx_rag_layer ON rag_chunks(layer);
   CREATE INDEX IF NOT EXISTS idx_agent_runs_agent ON agent_runs(agent_id, created_at);
   `);
+
+  // ---- Lightweight in-place migrations for existing DB files ----
+  // (SQLite: safe to attempt ADD COLUMN, swallow "duplicate column" errors)
+  const tryExec = (sql) => { try { db.exec(sql); } catch (e) { /* ok: already exists */ } };
+  tryExec(`ALTER TABLE companies ADD COLUMN activation_status TEXT DEFAULT 'draft'`);
+  tryExec(`ALTER TABLE companies ADD COLUMN business_description TEXT`);
+  tryExec(`ALTER TABLE registration_orders ADD COLUMN gates TEXT DEFAULT '{}'`);
+  tryExec(`ALTER TABLE registration_orders ADD COLUMN paid_at TEXT`);
+  tryExec(`ALTER TABLE registration_orders ADD COLUMN payment_status TEXT DEFAULT 'unpaid'`);
+  tryExec(`ALTER TABLE registration_orders ADD COLUMN constitution_bundle TEXT`);
+
+  // Indexes that depend on migrated columns – run AFTER ADD COLUMN
+  tryExec(`CREATE INDEX IF NOT EXISTS idx_companies_activation ON companies(activation_status)`);
+  tryExec(`CREATE INDEX IF NOT EXISTS idx_orders_payment ON registration_orders(payment_status, stage)`);
+
   console.log('[DB] Schema initialized at', DB_PATH);
 }
 

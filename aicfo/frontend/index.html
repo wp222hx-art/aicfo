@@ -26,6 +26,7 @@
       <a data-route="dashboard" data-i18n="nav.dashboard" onclick="nav('dashboard');closeNav()">📊 Dashboard</a>
       <a data-route="myArchive"  data-i18n="nav.myArchive"  onclick="nav('myArchive');closeNav()">📚 My Archive</a>
       <a data-route="register"  data-i18n="nav.register"  onclick="nav('register');closeNav()">🏢 Register</a>
+      <a data-route="regFlow"   onclick="nav('regFlow');closeNav()">🗺️ Flow Map</a>
       <a data-route="books"     data-i18n="nav.books"     onclick="nav('books');closeNav()">📘 Books</a>
       <a data-route="reports"   data-i18n="nav.reports"   onclick="nav('reports');closeNav()">📈 Reports</a>
       <a data-route="monthly"   data-i18n="nav.monthly"   onclick="nav('monthly');closeNav()">🗓️ Monthly</a>
@@ -35,6 +36,8 @@
       <a data-route="pricing"   data-i18n="nav.pricing"   onclick="nav('pricing');closeNav()">💳 Pricing</a>
       <a data-route="wa"        data-i18n="nav.wa"        onclick="nav('wa');closeNav()">📱 WhatsApp</a>
     </nav>
+
+    <div id="companySwitcher" class="hide-sm"></div>
 
     <button class="lang-toggle hide-sm" id="langToggle" onclick="I18N.toggleLocale()" title="Switch language / 切换语言">
       <span>🌐</span> <span id="langLabel" data-i18n="lang.toggle">中文</span>
