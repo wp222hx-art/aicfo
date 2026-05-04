@@ -140,14 +140,21 @@ window.addEventListener('hashchange', () => {
 // DASHBOARD
 // ================================================================================
 async function viewDashboard() {
+  console.info('[AiCFO] Dashboard render start, active company:', state.company?.id || '(none)');
   $('#view').innerHTML = `<div class="hero"><h1>${t('dash.loading')}</h1></div>`;
   const cid = state.company?.id;
+  // 每个请求独立容错 — 未付费公司的 books/tax 返回 402 时仍展示其它模块
+  const safe = (p, fallback) => p.catch(err => { console.warn('[AiCFO] API fallback:', err?.message); return fallback; });
+  const EMPTY_STATS = { companies: 0, active_companies: 0, pending_reviews: 0,
+                        agent_runs: { total: 0, avg_latency_ms: 0, avg_confidence: 0 },
+                        transactions: 0, invoices: 0 };
   const [stats, reminders, recentTxns, orders] = await Promise.all([
-    api('/admin/stats'),
-    cid ? api('/tax/reminders?company_id=' + cid) : Promise.resolve([]),
-    cid ? api('/books/transactions?company_id=' + cid + '&limit=6') : Promise.resolve([]),
-    api('/registration/orders?user_id=' + (state.user?.id || 'usr_demo_001'))
+    safe(api('/admin/stats'), EMPTY_STATS),
+    cid ? safe(api('/tax/reminders?company_id=' + cid), []) : Promise.resolve([]),
+    cid ? safe(api('/books/transactions?company_id=' + cid + '&limit=6'), []) : Promise.resolve([]),
+    safe(api('/registration/orders?user_id=' + (state.user?.id || 'usr_demo_001')), [])
   ]);
+  console.info('[AiCFO] Dashboard data loaded:', { stats: !!stats, reminders: reminders.length, txns: recentTxns.length, orders: orders.length });
 
   $('#view').innerHTML = `
     <section class="hero">
