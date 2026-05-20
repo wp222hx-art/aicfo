@@ -245,34 +245,61 @@ function logCall({ tier, model, purpose, latency_ms, tokens_in = 0, tokens_out =
 async function chat({ system, user, messages, purpose, tier, model, json = false, temperature } = {}) {
   const client = getClient();
   if (!client) throw new Error('LLM gateway not configured (missing API key). 请到后台 → 模型网关 填入 Tokenhot API Key。');
-  const useModel = getModel({ model, tier, purpose });
+  const cfg = getConfig();
+  const primaryModel = getModel({ model, tier, purpose });
   const msgs = messages || [
     { role: 'system', content: system || '' },
     { role: 'user',   content: user   || '' }
   ];
-  const t0 = Date.now();
-  try {
-    const req = { model: useModel, messages: msgs };
-    if (json)               req.response_format = { type: 'json_object' };
-    if (temperature != null) req.temperature = temperature;
-    const resp = await client.chat.completions.create(req);
-    const latency = Date.now() - t0;
-    const content = resp?.choices?.[0]?.message?.content || '';
-    const usage = resp?.usage || {};
-    logCall({
-      tier: tier || (purpose ? getConfig().tier_by_purpose[purpose] : 'default'),
-      model: useModel, purpose,
-      latency_ms: latency,
-      tokens_in: usage.prompt_tokens || 0,
-      tokens_out: usage.completion_tokens || 0,
-      status: 'ok'
-    });
-    return { content, model: useModel, latency_ms: latency, usage };
-  } catch (e) {
-    logCall({ tier, model: useModel, purpose,
-              latency_ms: Date.now() - t0, status: 'error', error: e.message });
-    throw e;
+  // 构造 fallback 模型链：主模型 → 同 tier 其它备选 → 跨 tier 兜底
+  const resolvedTier = tier || (purpose ? cfg.tier_by_purpose[purpose] : null) || 'default';
+  const sameTierAlts = (cfg.available_models?.[resolvedTier] || []).filter(m => m !== primaryModel);
+  const crossTierAlts = ['default', 'fast', 'reasoning']
+    .filter(t => t !== resolvedTier)
+    .flatMap(t => cfg.available_models?.[t] || []);
+  const tryModels = [primaryModel, ...sameTierAlts, ...crossTierAlts].slice(0, 5);
+
+  let lastErr = null;
+  for (const useModel of tryModels) {
+    const t0 = Date.now();
+    try {
+      const req = { model: useModel, messages: msgs };
+      if (json)                req.response_format = { type: 'json_object' };
+      if (temperature != null) req.temperature = temperature;
+      const resp = await client.chat.completions.create(req);
+      const latency = Date.now() - t0;
+      const content = resp?.choices?.[0]?.message?.content || '';
+      const usage = resp?.usage || {};
+      logCall({
+        tier: resolvedTier,
+        model: useModel, purpose,
+        latency_ms: latency,
+        tokens_in: usage.prompt_tokens || 0,
+        tokens_out: usage.completion_tokens || 0,
+        status: useModel === primaryModel ? 'ok' : 'fallback_ok'
+      });
+      if (useModel !== primaryModel) {
+        console.warn(`[LLM] Fallback succeeded: ${primaryModel} → ${useModel}`);
+      }
+      return { content, model: useModel, latency_ms: latency, usage,
+               fallback: useModel !== primaryModel ? { from: primaryModel } : null };
+    } catch (e) {
+      lastErr = e;
+      logCall({ tier: resolvedTier, model: useModel, purpose,
+                latency_ms: Date.now() - t0, status: 'error', error: e.message });
+      const status = e.status || e.response?.status;
+      const code = e.code || e.error?.code;
+      // 仅在「模型不可用」类错误时切到下一个模型；网络/鉴权错误直接抛
+      const isModelUnavailable =
+        code === 'model_not_found' ||
+        status === 503 ||
+        status === 404 ||
+        /no.*available.*channel|distributor|无可用渠道/i.test(e.message || '');
+      if (!isModelUnavailable) throw e;
+      console.warn(`[LLM] Model ${useModel} unavailable (${code || status}), trying next…`);
+    }
   }
+  throw lastErr || new Error('All models exhausted');
 }
 
 // --------------------------------------------------------------------------------

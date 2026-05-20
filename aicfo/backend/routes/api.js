@@ -1065,49 +1065,65 @@ router.get('/chat/sessions/:id/messages', (req, res) => {
 });
 
 router.post('/chat/send', async (req, res) => {
-  const { session_id, message, user_id = 'usr_demo_001', company_id, mode = 'ai' } = req.body || {};
-  // Ensure session
-  let sid = session_id;
-  if (!sid) {
-    sid = `sess_${uuid().slice(0, 8)}`;
-    db.prepare(`INSERT INTO chat_sessions (id,user_id,company_id,title) VALUES (?,?,?,?)`)
-      .run(sid, user_id, company_id || null, (message || '').slice(0, 40));
-  }
-  // User message
-  const umid = `msg_${uuid().slice(0, 8)}`;
-  db.prepare(`INSERT INTO chat_messages (id,session_id,role,content) VALUES (?,?,?,?)`)
-    .run(umid, sid, 'user', message);
+  try {
+    const { session_id, message, user_id = 'usr_demo_001', company_id, mode = 'ai' } = req.body || {};
+    if (!message || !message.trim()) {
+      return res.status(400).json({ error: 'message is required' });
+    }
+    // Ensure session
+    let sid = session_id;
+    if (!sid) {
+      sid = `sess_${uuid().slice(0, 8)}`;
+      db.prepare(`INSERT INTO chat_sessions (id,user_id,company_id,title) VALUES (?,?,?,?)`)
+        .run(sid, user_id, company_id || null, (message || '').slice(0, 40));
+    }
+    // User message
+    const umid = `msg_${uuid().slice(0, 8)}`;
+    db.prepare(`INSERT INTO chat_messages (id,session_id,role,content) VALUES (?,?,?,?)`)
+      .run(umid, sid, 'user', message);
 
-  // 读取最近 8 条历史作为上下文
-  const history = db.prepare(
-    `SELECT role, content FROM chat_messages WHERE session_id=? ORDER BY created_at DESC LIMIT 8`
-  ).all(sid).reverse();
+    // 读取最近 8 条历史作为上下文
+    const history = db.prepare(
+      `SELECT role, content FROM chat_messages WHERE session_id=? ORDER BY created_at DESC LIMIT 8`
+    ).all(sid).reverse();
 
-  let payload;
-  if (mode === 'agent') {
-    // 保留原 Master Agent 流程
-    const result = await orchestrator.runMaster({ user_query: message, user_id, company_id, session_id: sid });
-    const content = typeof result.response === 'string' ? result.response :
-      (result.response.summary || JSON.stringify(result.response));
-    payload = {
-      reply: content, citations: result.rag_citations || [],
-      model: 'master-agent', mode: 'agent',
-      intent: result.intent, confidence: result.confidence, need_human: result.need_human,
-      agent: result.agent
-    };
-  } else {
-    // 默认：真实 GPT + RAG
-    const r = await aiChat.chatWithRAG({
-      message, company_id, history: history.slice(0, -1), // 排除刚刚插入的这条 user
+    let payload;
+    if (mode === 'agent') {
+      const result = await orchestrator.runMaster({ user_query: message, user_id, company_id, session_id: sid });
+      const content = typeof result.response === 'string' ? result.response :
+        (result.response.summary || JSON.stringify(result.response));
+      payload = {
+        reply: content, citations: result.rag_citations || [],
+        model: 'master-agent', mode: 'agent',
+        intent: result.intent, confidence: result.confidence, need_human: result.need_human,
+        agent: result.agent
+      };
+    } else {
+      const r = await aiChat.chatWithRAG({
+        message, company_id, history: history.slice(0, -1)
+      });
+      payload = { reply: r.reply, citations: r.citations, model: r.model, mode: 'ai', latency_ms: r.latency_ms };
+    }
+
+    const amid = `msg_${uuid().slice(0, 8)}`;
+    db.prepare(`INSERT INTO chat_messages (id,session_id,role,content,metadata) VALUES (?,?,?,?,?)`)
+      .run(amid, sid, 'assistant', payload.reply, JSON.stringify(payload));
+
+    res.json({ session_id: sid, message_id: amid, ...payload });
+  } catch (e) {
+    console.error('[chat/send] error:', e?.message);
+    const status = e.status || e.response?.status || 500;
+    const code = e.code || e.error?.code || 'chat_failed';
+    res.status(status >= 400 && status < 600 ? status : 500).json({
+      error: e.message || 'AI chat failed',
+      code,
+      hint: code === 'model_not_found'
+        ? '当前配置的模型在 Tokenhot 已下线或无可用渠道。请到后台 → 模型网关 切换到其它模型 (建议 claude-sonnet-4.6 / gpt-5.4 / DeepSeek-V3.2)。'
+        : code === 'invalid_api_key' || status === 401
+        ? '后台 → 模型网关 的 API Key 无效或过期，请重新填入。'
+        : '请检查网络与模型可用性，或在后台 → 模型网关 → 实测 验证连通性。'
     });
-    payload = { reply: r.reply, citations: r.citations, model: r.model, mode: 'ai', latency_ms: r.latency_ms };
   }
-
-  const amid = `msg_${uuid().slice(0, 8)}`;
-  db.prepare(`INSERT INTO chat_messages (id,session_id,role,content,metadata) VALUES (?,?,?,?,?)`)
-    .run(amid, sid, 'assistant', payload.reply, JSON.stringify(payload));
-
-  res.json({ session_id: sid, message_id: amid, ...payload });
 });
 
 // ---------- AI Knowledge Base Builder ----------

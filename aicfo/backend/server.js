@@ -4,6 +4,16 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 
+// 进程级异常兜底 — 防止 LLM 第三方 SDK 偶发抛错把进程整死
+process.on('uncaughtException', (err) => {
+  console.error('[PROCESS] uncaughtException:', err?.message || err);
+  if (err?.stack) console.error(err.stack);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[PROCESS] unhandledRejection:', reason?.message || reason);
+  if (reason?.stack) console.error(reason.stack);
+});
+
 // Initialize DB + seed
 require('./db/schema');
 const { seed } = require('./db/seed');
